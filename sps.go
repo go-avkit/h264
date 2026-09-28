@@ -214,13 +214,25 @@ func (s *SPS) size() {
 	s.Width = s.MBWidth * 16
 	s.Height = s.MBHeight * 16
 
-	cropX, cropY := uint32(1), uint32(1)
-	if s.ChromaFormat != 0 && !s.SeparatePlanes {
-		// 4:2:0 and 4:2:2 are half width; only 4:2:0 is half height.
-		cropX = 2
-		if s.ChromaFormat == 1 {
-			cropY = 2
-		}
+	// ⛔ A switch on the format, not a condition that only excludes monochrome.
+	// The condition here before asked whether there IS chroma, which lumps 4:4:4
+	// in with the subsampled formats -- and 4:4:4 has chroma at FULL size, so its
+	// unit is one sample. It reported a 4:4:4 picture narrower than it is by half
+	// its crop, and that looks like a plausible size.
+	//
+	// The test that should have caught it used separate colour planes, which take
+	// the other branch, so the case was never exercised. Found by writing the same
+	// arithmetic in go-avkit/h265 and testing it there.
+	var cropX, cropY uint32
+	switch {
+	case s.ChromaFormat == 1: // 4:2:0, half in both directions
+		cropX, cropY = 2, 2
+	case s.ChromaFormat == 2: // 4:2:2, half width only
+		cropX, cropY = 2, 1
+	default: // monochrome and 4:4:4: one sample each way
+		// Separate colour planes need no case of their own: the flag only exists
+		// when the format is 4:4:4, which lands here already.
+		cropX, cropY = 1, 1
 	}
 	if !s.FrameMBSOnly {
 		cropY *= 2
