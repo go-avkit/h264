@@ -84,7 +84,7 @@ func ParseSliceHeader(u Unit, sps SPS, pps PPS) (SliceHeader, error) {
 	if u.Type != UnitIDR && u.Type != UnitNonIDR {
 		return SliceHeader{}, fmt.Errorf("%w: type %d", ErrNotSlice, u.Type)
 	}
-	r := &sticky{r: NewReader(u.Unescape())}
+	r := newSticky(u.Unescape())
 	var h SliceHeader
 	h.IDR = u.Type == UnitIDR
 

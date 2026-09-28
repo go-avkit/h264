@@ -54,7 +54,7 @@ func ParsePPS(u Unit, sps SPS) (PPS, error) {
 	if u.Type != UnitPPS {
 		return PPS{}, fmt.Errorf("%w: type %d", ErrNotPPS, u.Type)
 	}
-	r := &sticky{r: NewReader(u.Unescape())}
+	r := newSticky(u.Unescape())
 	var p PPS
 
 	p.ID = r.ue()
@@ -124,35 +124,4 @@ func ParsePPS(u Unit, sps SPS) (PPS, error) {
 			ErrUnsupportedPPS, r.r.Left())
 	}
 	return p, nil
-}
-
-// moreData says whether any syntax element remains before the bits that end a
-// raw byte sequence payload.
-//
-// Those bits are a single one followed by zeros to the byte boundary, so what is
-// left is a field only if a one appears after the first one, or the first one is
-// not where the padding would put it. Reading them as a field is how an optional
-// tail comes to be read from a set that does not have one.
-func (s *sticky) moreData() bool {
-	if s.err != nil {
-		return false
-	}
-	left := s.r.Left()
-	if left == 0 {
-		// Nothing at all is left, not even the bits that should end a payload.
-		// Every field did read, so this is accepted rather than refused: what a
-		// set states is what it states, and a missing byte of padding changes
-		// none of it.
-		return false
-	}
-	// Anything longer than a byte of padding must hold a field.
-	if left > 8 {
-		return true
-	}
-	// Peek cannot refuse this: left IS what remains, so the bits asked for are
-	// exactly the bits there are. Checking would be a branch no input can reach.
-	rest, _ := s.r.Peek(left)
-	// The trailing pattern is one followed by zeros: as a number, a single bit
-	// set at the top of what is left.
-	return rest != 1<<uint(left-1)
 }

@@ -4,27 +4,13 @@
 // Package h264 reads an H.264/AVC bitstream in pure Go, with no libavcodec
 // linkage and no external binaries.
 //
-// It begins at the layer everything else stands on: finding the NAL units in a
-// stream, undoing the escaping inside one, and reading the variable-length
-// integers H.264 writes its parameter sets with.
+// The framing and the bit reading live in go-avkit/bitstream, which H.265 shares:
+// the two formats separate their units identically and differ only in how the
+// header bytes of a unit are read. This package is that difference, and what
+// stands on it.
 package h264
 
-import (
-	"encoding/binary"
-	"errors"
-	"fmt"
-)
-
-// Errors a stream can be refused with.
-var (
-	// ErrNoStartCode means a byte stream holds no NAL unit at all.
-	ErrNoStartCode = errors.New("h264: no start code in the byte stream")
-	// ErrLengthOverrun means a length-prefixed unit claims more bytes than
-	// the stream holds.
-	ErrLengthOverrun = errors.New("h264: NAL length runs past the end")
-	// ErrEmptyUnit means a NAL unit has no header byte.
-	ErrEmptyUnit = errors.New("h264: NAL unit is empty")
-)
+import "github.com/go-avkit/bitstream"
 
 // UnitType is what a NAL unit holds. Only the ones this package acts on are
 // named; the rest travel as their number.
@@ -42,9 +28,9 @@ const (
 
 // Unit is one NAL unit: its header and its payload, still escaped.
 //
-// Payload is a window into the caller's bytes and is not copied. Unescape is
-// what makes a readable copy, and it is separate because most units are walked
-// past rather than read: a stream of a thousand slices costs one allocation per
+// Payload is a window into the caller's bytes and is not copied. Unescape is what
+// makes a readable copy, and it is separate because most units are walked past
+// rather than read: a stream of a thousand slices costs one allocation per
 // parameter set this way, not one per unit.
 type Unit struct {
 	Type    UnitType
@@ -53,151 +39,108 @@ type Unit struct {
 }
 
 // SplitAnnexB finds the NAL units of a byte stream, the form a .264 file and an
-// MPEG-TS stream carry.
+// MPEG-TS stream carry, and reads each one's header.
 //
-// Units are separated by a start code of two or more zero bytes and a one. Three
-// zeros and a one is the same separator with a leading zero, so the scan looks
-// for the three-byte form and lets a fourth zero belong to the gap rather than
-// to the unit -- a unit that began with a stray zero would have a nal_ref_idc
-// and a type read out of it that were never written.
-//
-// Trailing zero bytes are dropped from each unit for the same reason in reverse:
-// an encoder is allowed to pad, and the padding is not payload.
+// The separating is bitstream's, which knows nothing about headers; the ONE byte
+// of header is read here, because that is what differs between this format and
+// H.265.
 func SplitAnnexB(data []byte) ([]Unit, error) {
-	starts := startCodes(data)
-	if len(starts) == 0 {
-		return nil, ErrNoStartCode
+	raw, err := bitstream.SplitAnnexB(data)
+	if err != nil {
+		return nil, err
 	}
-	units := make([]Unit, 0, len(starts))
-	for i, at := range starts {
-		end := len(data)
-		if i+1 < len(starts) {
-			end = starts[i+1].at
-		}
-		body := data[at.after:end]
-		// The next start code may have been found by its three-byte form while
-		// a zero before it belongs to the gap.
-		for len(body) > 0 && body[len(body)-1] == 0 {
-			body = body[:len(body)-1]
-		}
-		u, err := newUnit(body)
-		if err != nil {
-			// A stream whose last separator is followed by nothing is a stream
-			// that was cut, not one that is malformed: what came before it
-			// still reads.
-			if errors.Is(err, ErrEmptyUnit) && i == len(starts)-1 {
-				break
-			}
-			return nil, fmt.Errorf("unit %d: %w", i+1, err)
-		}
-		units = append(units, u)
-	}
-	if len(units) == 0 {
-		return nil, ErrNoStartCode
-	}
-	return units, nil
-}
-
-// startCode is where one starts and where the unit after it begins.
-type startCode struct{ at, after int }
-
-// startCodes finds every 00 00 01 in data.
-func startCodes(data []byte) []startCode {
-	var out []startCode
-	for i := 0; i+2 < len(data); {
-		if data[i] == 0 && data[i+1] == 0 && data[i+2] == 1 {
-			out = append(out, startCode{at: i, after: i + 3})
-			i += 3
-			continue
-		}
-		i++
-	}
-	return out
+	return units(raw)
 }
 
 // SplitLengthPrefixed finds the NAL units of the form an MP4 sample carries,
-// where each unit is preceded by its length in lengthSize bytes.
+// where each is preceded by its length in lengthSize bytes, and reads each one's
+// header.
 //
-// lengthSize comes from the avcC record and is 1, 2 or 4 in practice; anything
-// else is refused rather than guessed, since a wrong size reads a length out of
-// payload and would walk the stream into nonsense.
+// lengthSize comes from the avcC record and is 1, 2 or 4 in practice.
 func SplitLengthPrefixed(data []byte, lengthSize int) ([]Unit, error) {
-	switch lengthSize {
-	case 1, 2, 3, 4:
-	default:
-		return nil, fmt.Errorf("h264: NAL length size %d is not 1 to 4", lengthSize)
+	raw, err := bitstream.SplitLengthPrefixed(data, lengthSize)
+	if err != nil {
+		return nil, err
 	}
-	var units []Unit
-	for off := 0; off < len(data); {
-		if off+lengthSize > len(data) {
-			return nil, fmt.Errorf("%w: %d bytes left, a length needs %d",
-				ErrLengthOverrun, len(data)-off, lengthSize)
-		}
-		n := int(readLength(data[off:off+lengthSize], lengthSize))
-		off += lengthSize
-		if n == 0 {
-			continue
-		}
-		if off+n > len(data) {
-			return nil, fmt.Errorf("%w: %d bytes claimed, %d left", ErrLengthOverrun, n, len(data)-off)
-		}
-		// newUnit cannot refuse this: a zero length was skipped just above, so
-		// the body holds at least the header byte. Checking it here would be a
-		// branch no input can reach.
-		u, _ := newUnit(data[off : off+n])
-		units = append(units, u)
-		off += n
-	}
-	return units, nil
+	return units(raw)
 }
 
-// readLength reads a big-endian length of 1 to 4 bytes.
-func readLength(b []byte, size int) uint32 {
-	switch size {
-	case 1:
-		return uint32(b[0])
-	case 2:
-		return uint32(binary.BigEndian.Uint16(b))
-	case 3:
-		return uint32(b[0])<<16 | uint32(b[1])<<8 | uint32(b[2])
-	default:
-		return binary.BigEndian.Uint32(b)
-	}
-}
-
-// newUnit reads a unit's one header byte.
-func newUnit(body []byte) (Unit, error) {
-	if len(body) == 0 {
-		return Unit{}, ErrEmptyUnit
-	}
-	return Unit{
-		Type:    UnitType(body[0] & 0x1F),
-		RefIDC:  body[0] >> 5 & 3,
-		Payload: body[1:],
-	}, nil
-}
-
-// Unescape undoes the escaping inside a NAL unit's payload.
+// units reads the header byte of each raw unit.
 //
-// H.264 may not carry three consecutive bytes that look like a start code, so an
-// encoder writes 00 00 03 where it means 00 00 and the reader drops the three.
-// ⛔ Only a three that follows exactly two zeros is an escape: dropping every
-// three after any zero would eat payload, and the byte after the escape is
-// whatever it is -- including another zero, which starts the count again.
-func (u Unit) Unescape() []byte {
-	out := make([]byte, 0, len(u.Payload))
-	zeros := 0
-	for _, b := range u.Payload {
-		if zeros == 2 && b == 3 {
-			zeros = 0
-			continue
-		}
-		if b == 0 {
-			zeros++
-		} else {
-			zeros = 0
-		}
-		out = append(out, b)
+// ⛔ bitstream drops a unit with no bytes at all, so nothing here can be empty:
+// the framing hands back only units that hold something. A check for it would be a
+// branch no input can reach.
+func units(raw [][]byte) ([]Unit, error) {
+	out := make([]Unit, 0, len(raw))
+	for _, body := range raw {
+		out = append(out, Unit{
+			Type:    UnitType(body[0] & 0x1F),
+			RefIDC:  body[0] >> 5 & 3,
+			Payload: body[1:],
+		})
 	}
-	return out
+	return out, nil
+}
+
+// Unescape undoes the escaping inside this unit's payload.
+func (u Unit) Unescape() []byte { return bitstream.Unescape(u.Payload) }
+
+// sticky reads fields in a straight line, keeping the first error.
+//
+// The shape of a parameter set stays visible in the code instead of being buried
+// under a check after every field, and a zero read past the end is never handed to
+// a caller because err is checked before anything is returned.
+type sticky struct {
+	r   *bitstream.Reader
+	err error
+}
+
+func newSticky(data []byte) *sticky { return &sticky{r: bitstream.NewReader(data)} }
+
+func (s *sticky) bit() uint32 {
+	if s.err != nil {
+		return 0
+	}
+	v, err := s.r.Bit()
+	s.err = err
+	return v
+}
+
+func (s *sticky) bits(n int) uint32 {
+	if s.err != nil {
+		return 0
+	}
+	v, err := s.r.Bits(n)
+	s.err = err
+	return v
+}
+
+func (s *sticky) flag() bool { return s.bit() == 1 }
+
+func (s *sticky) ue() uint32 {
+	if s.err != nil {
+		return 0
+	}
+	v, err := s.r.UE()
+	s.err = err
+	return v
+}
+
+func (s *sticky) se() int32 {
+	if s.err != nil {
+		return 0
+	}
+	v, err := s.r.SE()
+	s.err = err
+	return v
+}
+
+// moreData says whether any syntax element remains before the bits that end a
+// payload. It is bitstream's question; this only stops asking it once a read has
+// failed.
+func (s *sticky) moreData() bool {
+	if s.err != nil {
+		return false
+	}
+	return s.r.MoreData()
 }
