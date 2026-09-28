@@ -149,3 +149,35 @@ func TestBitsRefusesAWidthItCannotFill(t *testing.T) {
 		t.Errorf("err = %v, want ErrShort", err)
 	}
 }
+
+func TestLeftAndPeekAnswerWithoutConsuming(t *testing.T) {
+	r := NewReader([]byte{0b1010_0000})
+	if r.Left() != 8 {
+		t.Fatalf("Left = %d, want 8", r.Left())
+	}
+	if _, err := r.Bits(3); err != nil {
+		t.Fatal(err)
+	}
+	if r.Left() != 5 {
+		t.Errorf("Left = %d, want 5", r.Left())
+	}
+	// ⛔ Peek must not consume: the whole point is to ask what is left without
+	// spending the field being asked about.
+	v, err := r.Peek(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != 0b0_0000 {
+		t.Errorf("Peek = %05b", v)
+	}
+	if r.Left() != 5 {
+		t.Errorf("Peek consumed %d bits", 5-r.Left())
+	}
+	if _, err := r.Peek(6); !errors.Is(err, ErrShort) {
+		t.Errorf("Peek past the end: err = %v, want ErrShort", err)
+	}
+	// And a refused Peek leaves the position where it was.
+	if r.Left() != 5 {
+		t.Errorf("a refused Peek moved the reader to %d bits left", r.Left())
+	}
+}
