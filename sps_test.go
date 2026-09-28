@@ -202,6 +202,16 @@ func TestASetStatesTheCroppedSize(t *testing.T) {
 			1920, 1080,
 		},
 		{
+			// ⛔ The case the suite was missing. With the planes coded together
+			// the format is still 4:4:4, so the unit is still one sample -- and
+			// the condition this replaced took two, reporting 1912x1072 for a
+			// picture that is 1916x1080.
+			"4:4:4 with the planes together crops by one",
+			set{profile: 244, level: 40, chroma: 3, mbWidth: 120, mapUnits: 68,
+				frameMBSOnly: true, crop: [4]uint32{0, 4, 0, 8}},
+			1916, 1080,
+		},
+		{
 			"4:4:4 with separate planes crops by one",
 			set{profile: 244, level: 40, chroma: 3, mbWidth: 120, mapUnits: 68,
 				frameMBSOnly: true, crop: [4]uint32{0, 0, 0, 8}},
