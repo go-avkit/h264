@@ -49,6 +49,23 @@ func (r *Reader) Bit() (uint32, error) {
 	return uint32(b>>shift) & 1, nil
 }
 
+// Left is how many bits remain. It is what tells a reader whether an optional
+// field follows or only the bits that end a payload.
+func (r *Reader) Left() int { return len(r.data)*8 - r.pos }
+
+// Peek reads n bits without consuming them.
+//
+// It exists for one question the format asks and cannot be answered any other
+// way: whether what is left is a syntax element or the padding that ends a raw
+// byte sequence payload. Answering it by reading would consume the field it was
+// asking about.
+func (r *Reader) Peek(n int) (uint32, error) {
+	at := r.pos
+	v, err := r.Bits(n)
+	r.pos = at
+	return v, err
+}
+
 // Bits reads n bits, most significant first.
 func (r *Reader) Bits(n int) (uint32, error) {
 	var v uint32
