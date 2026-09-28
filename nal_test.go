@@ -124,3 +124,65 @@ func TestUnescapeDropsOnlyARealEscape(t *testing.T) {
 		})
 	}
 }
+
+// TestEveryLengthSizeIsReadBigEndian.
+//
+// ⛔ avcC states this size, and all four widths occur. A size read with the wrong
+// byte order or the wrong width lands on a plausible boundary rather than
+// failing, so each one is stated here against a length only the right reading
+// produces.
+func TestEveryLengthSizeIsReadBigEndian(t *testing.T) {
+	for _, tc := range []struct {
+		size   int
+		prefix []byte
+	}{
+		{1, []byte{2}},
+		{2, []byte{0, 2}},
+		{3, []byte{0, 0, 2}},
+		{4, []byte{0, 0, 0, 2}},
+	} {
+		stream := append(append([]byte(nil), tc.prefix...), 0x67, 'x')
+		units, err := SplitLengthPrefixed(stream, tc.size)
+		if err != nil {
+			t.Errorf("size %d: %v", tc.size, err)
+			continue
+		}
+		if len(units) != 1 || units[0].Type != UnitSPS || string(units[0].Payload) != "x" {
+			t.Errorf("size %d: %+v", tc.size, units)
+		}
+	}
+}
+
+// TestAZeroLengthUnitIsSkippedRatherThanRefused: a zero-length entry is padding
+// an encoder is allowed to write, and it describes no unit at all.
+func TestAZeroLengthUnitIsSkippedRatherThanRefused(t *testing.T) {
+	stream := []byte{0, 0, 0, 0, 0, 0, 0, 2, 0x68, 'y'}
+	units, err := SplitLengthPrefixed(stream, 4)
+	if err != nil {
+		t.Fatalf("SplitLengthPrefixed: %v", err)
+	}
+	if len(units) != 1 || units[0].Type != UnitPPS {
+		t.Fatalf("%d units, want just the PPS: %+v", len(units), units)
+	}
+}
+
+// TestAUnitWithNoHeaderByteIsRefused, except at the very end of a cut stream,
+// which the test above covers. Here it is in the middle, where it means the
+// stream is malformed rather than truncated.
+func TestAUnitWithNoHeaderByteIsRefused(t *testing.T) {
+	if _, err := SplitAnnexB([]byte{0, 0, 1, 0, 0, 1, 0x67, 'a'}); !errors.Is(err, ErrEmptyUnit) {
+		t.Errorf("annex B: err = %v, want ErrEmptyUnit", err)
+	}
+	if _, err := SplitLengthPrefixed([]byte{0, 0, 0, 1}, 4); err == nil {
+		t.Error("length-prefixed: a unit of one byte with no header was accepted")
+	}
+}
+
+// TestAStreamOfNothingButSeparatorsHoldsNoUnit is the control on the refusal
+// above: every separator is followed by nothing, so there is no unit at all and
+// saying so is not the same as saying the stream is malformed.
+func TestAStreamOfNothingButSeparatorsHoldsNoUnit(t *testing.T) {
+	if _, err := SplitAnnexB([]byte{0, 0, 1}); !errors.Is(err, ErrNoStartCode) {
+		t.Errorf("err = %v, want ErrNoStartCode", err)
+	}
+}

@@ -62,12 +62,6 @@ func (r *Reader) Bits(n int) (uint32, error) {
 	return v, nil
 }
 
-// Flag reads one bit as a flag.
-func (r *Reader) Flag() (bool, error) {
-	b, err := r.Bit()
-	return b == 1, err
-}
-
 // UE reads an unsigned Exp-Golomb integer: n zeros, a one, then n more bits,
 // giving a value of 2^n - 1 plus those bits.
 func (r *Reader) UE() (uint32, error) {

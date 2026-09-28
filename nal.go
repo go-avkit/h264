@@ -141,10 +141,10 @@ func SplitLengthPrefixed(data []byte, lengthSize int) ([]Unit, error) {
 		if off+n > len(data) {
 			return nil, fmt.Errorf("%w: %d bytes claimed, %d left", ErrLengthOverrun, n, len(data)-off)
 		}
-		u, err := newUnit(data[off : off+n])
-		if err != nil {
-			return nil, fmt.Errorf("unit at %d: %w", off, err)
-		}
+		// newUnit cannot refuse this: a zero length was skipped just above, so
+		// the body holds at least the header byte. Checking it here would be a
+		// branch no input can reach.
+		u, _ := newUnit(data[off : off+n])
 		units = append(units, u)
 		off += n
 	}

@@ -129,3 +129,23 @@ func TestBitsAndPosSayWhereAReaderIs(t *testing.T) {
 		t.Errorf("Bits(8) across a byte boundary = %b, %v", v, err)
 	}
 }
+
+// TestSignedCodeRefusesWhatTheUnsignedOneDid: SE is UE folded, so a refusal of
+// the code underneath has to reach the caller rather than becoming a zero.
+func TestSignedCodeRefusesWhatTheUnsignedOneDid(t *testing.T) {
+	if _, err := NewReader(nil).SE(); !errors.Is(err, ErrShort) {
+		t.Errorf("err = %v, want ErrShort", err)
+	}
+	if _, err := NewReader(make([]byte, 64)).SE(); !errors.Is(err, ErrTooLong) {
+		t.Errorf("err = %v, want ErrTooLong", err)
+	}
+}
+
+// TestBitsRefusesAWidthItCannotFill covers the middle of a fixed-width read: the
+// first bits are there and the last are not, which is where a reader that padded
+// would hand back a value nobody wrote.
+func TestBitsRefusesAWidthItCannotFill(t *testing.T) {
+	if _, err := NewReader([]byte{0xFF}).Bits(9); !errors.Is(err, ErrShort) {
+		t.Errorf("err = %v, want ErrShort", err)
+	}
+}
