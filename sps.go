@@ -39,6 +39,14 @@ type SPS struct {
 	Width           uint32 // cropped, in luma samples
 	Height          uint32
 	MaxNumRefFrames uint32
+
+	// What a slice header cannot be read without. A slice states its frame
+	// number and its picture order count in widths and shapes this set decides,
+	// so a reader holding only the picture size cannot walk one field of a slice.
+	Log2MaxFrameNum uint8
+	POCType         uint32
+	Log2MaxPOCLSB   uint8
+	POCAlwaysZero   bool
 }
 
 // highProfiles are the profile_idc values that carry a chroma format, bit depths
@@ -77,8 +85,8 @@ func ParseSPS(u Unit) (SPS, error) {
 		}
 	}
 
-	r.ue() // log2_max_frame_num_minus4
-	if err := skipPicOrderCnt(r); err != nil {
+	s.Log2MaxFrameNum = uint8(r.ue()) + 4
+	if err := s.readPicOrderCnt(r); err != nil {
 		return s, err
 	}
 	s.MaxNumRefFrames = r.ue()
@@ -166,16 +174,17 @@ func skipScalingList(r *sticky, n int) {
 	}
 }
 
-// skipPicOrderCnt consumes the picture order count fields, whose shape depends on
-// the type the set states.
-func skipPicOrderCnt(r *sticky) error {
-	switch t := r.ue(); t {
+// readPicOrderCnt reads the picture order count fields, whose shape depends on
+// the type the set states, and keeps what a slice header needs of them.
+func (s *SPS) readPicOrderCnt(r *sticky) error {
+	s.POCType = r.ue()
+	switch t := s.POCType; t {
 	case 0:
-		r.ue() // log2_max_pic_order_cnt_lsb_minus4
+		s.Log2MaxPOCLSB = uint8(r.ue()) + 4
 	case 1:
-		r.bit() // delta_pic_order_always_zero_flag
-		r.se()  // offset_for_non_ref_pic
-		r.se()  // offset_for_top_to_bottom_field
+		s.POCAlwaysZero = r.flag()
+		r.se() // offset_for_non_ref_pic
+		r.se() // offset_for_top_to_bottom_field
 		// ⛔ A count of offsets follows, each one signed. This is the second
 		// variable-length part of an SPS, and it is bounded: 255 is the most the
 		// format allows, and a larger count read out of a misaligned stream
