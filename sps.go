@@ -66,7 +66,7 @@ func ParseSPS(u Unit) (SPS, error) {
 	if u.Type != UnitSPS {
 		return SPS{}, fmt.Errorf("%w: type %d", ErrNotSPS, u.Type)
 	}
-	r := &sticky{r: NewReader(u.Unescape())}
+	r := newSticky(u.Unescape())
 	var s SPS
 
 	s.Profile = uint8(r.bits(8))
@@ -227,53 +227,4 @@ func (s *SPS) size() {
 	}
 	s.Width -= cropX * (s.CropLeft + s.CropRight)
 	s.Height -= cropY * (s.CropTop + s.CropBottom)
-}
-
-// sticky reads fields in a straight line, keeping the first error.
-//
-// It is not exported: Reader's own methods answer per field, which is what a
-// caller reading one value wants, and this is what a parse of two dozen wants.
-// The shape of the set stays visible in the code instead of being buried under a
-// check after every field.
-type sticky struct {
-	r   *Reader
-	err error
-}
-
-func (s *sticky) bit() uint32 {
-	if s.err != nil {
-		return 0
-	}
-	v, err := s.r.Bit()
-	s.err = err
-	return v
-}
-
-func (s *sticky) bits(n int) uint32 {
-	if s.err != nil {
-		return 0
-	}
-	v, err := s.r.Bits(n)
-	s.err = err
-	return v
-}
-
-func (s *sticky) flag() bool { return s.bit() == 1 }
-
-func (s *sticky) ue() uint32 {
-	if s.err != nil {
-		return 0
-	}
-	v, err := s.r.UE()
-	s.err = err
-	return v
-}
-
-func (s *sticky) se() int32 {
-	if s.err != nil {
-		return 0
-	}
-	v, err := s.r.SE()
-	s.err = err
-	return v
 }

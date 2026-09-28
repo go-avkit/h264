@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"errors"
 	"testing"
+
+	"github.com/go-avkit/bitstream"
 )
 
 func TestSplitAnnexBTakesBothStartCodeLengths(t *testing.T) {
@@ -41,8 +43,8 @@ func TestSplitAnnexBTakesBothStartCodeLengths(t *testing.T) {
 }
 
 func TestAStreamWithNoStartCodeIsRefused(t *testing.T) {
-	if _, err := SplitAnnexB([]byte{0x67, 'a', 'b'}); !errors.Is(err, ErrNoStartCode) {
-		t.Errorf("err = %v, want ErrNoStartCode", err)
+	if _, err := SplitAnnexB([]byte{0x67, 'a', 'b'}); !errors.Is(err, bitstream.ErrNoStartCode) {
+		t.Errorf("err = %v, want bitstream.ErrNoStartCode", err)
 	}
 }
 
@@ -86,12 +88,12 @@ func TestSplitLengthPrefixed(t *testing.T) {
 // payload is enormous. Walking on from it would either panic on a slice or, worse,
 // land on a plausible boundary and report units nobody wrote.
 func TestALengthPastTheEndIsRefused(t *testing.T) {
-	if _, err := SplitLengthPrefixed([]byte{0, 0, 0, 99, 0x67}, 4); !errors.Is(err, ErrLengthOverrun) {
-		t.Errorf("err = %v, want ErrLengthOverrun", err)
+	if _, err := SplitLengthPrefixed([]byte{0, 0, 0, 99, 0x67}, 4); !errors.Is(err, bitstream.ErrLengthOverrun) {
+		t.Errorf("err = %v, want bitstream.ErrLengthOverrun", err)
 	}
 	// A trailing fragment too short to hold a length at all.
-	if _, err := SplitLengthPrefixed([]byte{0, 0}, 4); !errors.Is(err, ErrLengthOverrun) {
-		t.Errorf("short tail: err = %v, want ErrLengthOverrun", err)
+	if _, err := SplitLengthPrefixed([]byte{0, 0}, 4); !errors.Is(err, bitstream.ErrLengthOverrun) {
+		t.Errorf("short tail: err = %v, want bitstream.ErrLengthOverrun", err)
 	}
 	if _, err := SplitLengthPrefixed([]byte{0x67}, 5); err == nil {
 		t.Error("a length size of 5 was accepted")
@@ -166,15 +168,26 @@ func TestAZeroLengthUnitIsSkippedRatherThanRefused(t *testing.T) {
 	}
 }
 
-// TestAUnitWithNoHeaderByteIsRefused, except at the very end of a cut stream,
-// which the test above covers. Here it is in the middle, where it means the
-// stream is malformed rather than truncated.
-func TestAUnitWithNoHeaderByteIsRefused(t *testing.T) {
-	if _, err := SplitAnnexB([]byte{0, 0, 1, 0, 0, 1, 0x67, 'a'}); !errors.Is(err, ErrEmptyUnit) {
-		t.Errorf("annex B: err = %v, want ErrEmptyUnit", err)
+// TestTwoSeparatorsInARowHoldNoUnitBetweenThem.
+//
+// ⛔ This used to be a refusal, and moving the framing into go-avkit/bitstream
+// changed it: the shared framing drops a unit with no bytes rather than refusing
+// the stream for it. The change is deliberate and worth pinning -- two separators
+// in a row are padding some muxers write, and losing the units around them would
+// be a worse answer than ignoring the gap. Nothing above can see an empty unit,
+// which is why reading the header byte needs no check for one.
+func TestTwoSeparatorsInARowHoldNoUnitBetweenThem(t *testing.T) {
+	units, err := SplitAnnexB([]byte{0, 0, 1, 0, 0, 1, 0x67, 'a'})
+	if err != nil {
+		t.Fatalf("SplitAnnexB: %v", err)
 	}
-	if _, err := SplitLengthPrefixed([]byte{0, 0, 0, 1}, 4); err == nil {
-		t.Error("length-prefixed: a unit of one byte with no header was accepted")
+	if len(units) != 1 || units[0].Type != UnitSPS {
+		t.Fatalf("%d units, want just the one with bytes in it: %+v", len(units), units)
+	}
+	// A length that claims a byte the stream does not hold is still refused: that
+	// is a length read wrongly, not a gap.
+	if _, err := SplitLengthPrefixed([]byte{0, 0, 0, 1}, 4); !errors.Is(err, bitstream.ErrLengthOverrun) {
+		t.Errorf("length-prefixed: err = %v, want bitstream.ErrLengthOverrun", err)
 	}
 }
 
@@ -182,7 +195,7 @@ func TestAUnitWithNoHeaderByteIsRefused(t *testing.T) {
 // above: every separator is followed by nothing, so there is no unit at all and
 // saying so is not the same as saying the stream is malformed.
 func TestAStreamOfNothingButSeparatorsHoldsNoUnit(t *testing.T) {
-	if _, err := SplitAnnexB([]byte{0, 0, 1}); !errors.Is(err, ErrNoStartCode) {
-		t.Errorf("err = %v, want ErrNoStartCode", err)
+	if _, err := SplitAnnexB([]byte{0, 0, 1}); !errors.Is(err, bitstream.ErrNoStartCode) {
+		t.Errorf("err = %v, want bitstream.ErrNoStartCode", err)
 	}
 }
