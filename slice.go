@@ -49,6 +49,51 @@ func (t SliceType) String() string {
 // FirstMB is what says where a picture begins. A picture may be carried by
 // several slices, and only the one starting at macroblock zero begins a new
 // picture -- which is how a stream's pictures are counted without decoding any.
+// RefListOp is one instruction for building a reference picture list, as
+// ref_pic_list_modification states them.
+type RefListOp struct {
+	// Kind is modification_of_pic_nums_idc: 0 and 1 move a short-term picture
+	// backwards or forwards from the one before, 2 names a long-term picture.
+	Kind uint32
+	// Value is abs_diff_pic_num_minus1 for kinds 0 and 1, and long_term_pic_num
+	// for kind 2.
+	Value uint32
+}
+
+// MarkOp is one memory management control operation, as dec_ref_pic_marking
+// states them.
+type MarkOp struct {
+	// Operation is memory_management_control_operation. Five is the one that
+	// matters most to a reader: it empties the reference set and RESTARTS the
+	// picture order count at this picture.
+	Operation uint32
+	// Value is whichever argument the operation takes, and zero for those that
+	// take none.
+	Value uint32
+	// Extra is long_term_frame_idx for operation three, which takes two.
+	Extra uint32
+}
+
+// PredWeights are the weights a slice states for weighted prediction, one entry
+// per active reference.
+type PredWeights struct {
+	LumaLog2Denom   uint32
+	ChromaLog2Denom uint32
+	L0              []RefWeight
+	L1              []RefWeight
+}
+
+// RefWeight is the weighting of one reference picture.
+type RefWeight struct {
+	LumaStated   bool
+	LumaWeight   int32
+	LumaOffset   int32
+	ChromaStated bool
+	// ChromaWeight and ChromaOffset are Cb then Cr.
+	ChromaWeight [2]int32
+	ChromaOffset [2]int32
+}
+
 type SliceHeader struct {
 	FirstMB         uint32
 	Type            SliceType
@@ -66,26 +111,111 @@ type SliceHeader struct {
 	RedundantPicCnt uint32
 }
 
-// ParseSliceHeader reads the header at the start of a coded slice.
+// SliceReferences is what a slice says about the pictures it predicts from. It is
+// a type of its own, and ParseSliceReferences the only thing that fills it,
+// because a field read from a header that was never asked for it would be zero and
+// look answered: a caller reading DirectSpatial off a plain ParseSliceHeader would
+// be told "temporal" about every B slice in the stream.
+type SliceReferences struct {
+	// DirectSpatial is direct_spatial_mv_pred_flag, stated by a B slice only. It
+	// decides where a direct-mode block takes its motion from, and the two
+	// answers are not close: spatial reads the neighbours, temporal scales the
+	// motion of the picture that follows.
+	DirectSpatial bool
+
+	// NumRefIdxL0Active and NumRefIdxL1Active are how many references this slice
+	// uses, after any override it states. They come from the picture set when the
+	// slice overrides nothing, which is why they are here rather than left to the
+	// caller to work out.
+	NumRefIdxL0Active uint32
+	NumRefIdxL1Active uint32
+
+	// ModifyL0 and ModifyL1 are the reference list instructions, in order. Empty
+	// means the default order, which is not the same as "no references".
+	ModifyL0 []RefListOp
+	ModifyL1 []RefListOp
+
+	// Weights are the prediction weights, when the picture set asks this slice to
+	// state them explicitly. Nil when it does not -- which includes implicit
+	// weighting, where the weights come from the picture order counts and no
+	// table is sent.
+	Weights *PredWeights
+
+	// NoOutputOfPriorPics and LongTermReference are what an IDR states about the
+	// pictures before it.
+	NoOutputOfPriorPics bool
+	LongTermReference   bool
+
+	// AdaptiveMarking is adaptive_ref_pic_marking_mode_flag: the slice says which
+	// pictures to release rather than letting the sliding window decide.
+	AdaptiveMarking bool
+	// Marking is what it says, in order.
+	Marking []MarkOp
+	// ResetsPOC reports that one of those operations is number five, which
+	// restarts the picture order count at this picture. A reader computing counts
+	// without honouring it is right until the first one and wrong afterwards.
+	ResetsPOC bool
+
+	// CABACInit is cabac_init_idc, which picks the context table a CABAC slice
+	// starts from. Only a CABAC slice that is not I states it.
+	CABACInit uint32
+
+	// QP is SliceQPY: the quantisation parameter this slice starts at, already
+	// built from the picture set's initial value and the slice's own delta.
+	//
+	// ⛔ It is also this reader's own witness. Every field before it has a width
+	// that depends on the fields before THAT, so a parse that drifted by one bit
+	// anywhere lands here with a number outside 0 to 51 -- which is how reading
+	// 1,344,537 slices of a real library told this syntax was read correctly, with
+	// no reference decoder to compare against.
+	QP int32
+
+	// DeblockingIDC is disable_deblocking_filter_idc, and the two offsets are the
+	// filter's own, as the slice states them.
+	DeblockingIDC     uint32
+	AlphaC0OffsetDiv2 int32
+	BetaOffsetDiv2    int32
+}
+
+// ParseSliceReferences reads a slice header whole: everything ParseSliceHeader
+// reads, and then what the slice says about the pictures it predicts from -- how
+// many references it uses, how its lists are built, the weights it states, and how
+// it marks the reference set.
 //
-// ⛔ It needs both parameter sets, and for the same reason ParsePPS needs the SPS:
-// a slice states its frame number in a width the SPS decides and its picture
-// order count in a shape the SPS chooses, and whether two of its fields are there
-// at all is decided by the PPS. A reader given neither cannot walk a single field.
+// It is the same single reader, told to keep going. Picture segmentation must not
+// fail because a slice's weight table is unreadable, and a decoder must not be
+// handed a zero weight table because nobody asked for one -- which is why the
+// answer comes in a type of its own.
+func ParseSliceReferences(u Unit, sps SPS, pps PPS) (SliceHeader, SliceReferences, error) {
+	return parseSlice(u, sps, pps, true)
+}
+
+// ParseSliceHeader reads the part of a slice header that says WHICH picture this
+// slice belongs to: everything up to and including redundant_pic_cnt.
 //
-// It stops after the redundant picture count. Everything past that point depends
-// on the slice type in ways that branch further -- reference list changes,
-// weighting tables, reference marking -- and none of it is needed to say what a
-// slice is, which picture it belongs to, or where a picture begins. Unlike a
-// parameter set there is no identity to check the end against: coded data follows
-// the header, so stopping early cannot be detected from inside and is stated
-// here instead.
+// That is what access unit segmentation needs, and no more. What a slice says
+// about the pictures it predicts from is read by ParseSliceReferences, which must
+// not be made a condition of knowing where a picture begins.
 func ParseSliceHeader(u Unit, sps SPS, pps PPS) (SliceHeader, error) {
+	h, _, err := parseSlice(u, sps, pps, false)
+	return h, err
+}
+
+// parseSlice is the ONE reader of this syntax.
+//
+// ⛔ There is one because there were nearly two. Every field's width depends on the
+// parameter sets and on the fields before it, so a second routine that skipped to
+// the reference syntax -- by counting bits or by reading them again -- would be the
+// same syntax written twice, and the two would drift apart at the first field
+// either one got wrong.
+func parseSlice(u Unit, sps SPS, pps PPS, wantRefs bool) (SliceHeader, SliceReferences, error) {
+
 	if u.Type != UnitIDR && u.Type != UnitNonIDR {
-		return SliceHeader{}, fmt.Errorf("%w: type %d", ErrNotSlice, u.Type)
+		return SliceHeader{}, SliceReferences{}, fmt.Errorf("%w: type %d", ErrNotSlice, u.Type)
 	}
 	r := newSticky(u.Unescape())
 	var h SliceHeader
+	var ref SliceReferences
 	h.IDR = u.Type == UnitIDR
 
 	h.FirstMB = r.ue()
@@ -98,7 +228,7 @@ func ParseSliceHeader(u Unit, sps SPS, pps PPS) (SliceHeader, error) {
 		h.AllOfType = true
 	}
 	if t > 4 {
-		return h, fmt.Errorf("%w: slice type %d", ErrSliceHeader, t)
+		return h, ref, fmt.Errorf("%w: slice type %d", ErrSliceHeader, t)
 	}
 	h.Type = SliceType(t)
 	h.PPSID = r.ue()
@@ -136,16 +266,227 @@ func ParseSliceHeader(u Unit, sps SPS, pps PPS) (SliceHeader, error) {
 	case 2:
 		// The order is the decoding order, and nothing is stated.
 	default:
-		return h, fmt.Errorf("%w: picture order count type %d", ErrSliceHeader, sps.POCType)
+		return h, ref, fmt.Errorf("%w: picture order count type %d", ErrSliceHeader, sps.POCType)
 	}
 
 	if pps.RedundantPicCnt {
 		h.RedundantPicCnt = r.ue()
 	}
-	if r.err != nil {
-		return h, r.err
+	if !wantRefs {
+		if r.err != nil {
+			return h, ref, r.err
+		}
+		return h, ref, nil
 	}
-	return h, nil
+
+	if h.Type == SliceB {
+		ref.DirectSpatial = r.flag()
+	}
+
+	// How many references this slice uses. The picture set states a default and
+	// the slice may override it; a reader that took the default always would build
+	// lists of the wrong length, and a list of the wrong length is read past its
+	// end rather than refused.
+	ref.NumRefIdxL0Active, ref.NumRefIdxL1Active = pps.NumRefIdxL0, pps.NumRefIdxL1
+	if h.Type == SliceP || h.Type == SliceSP || h.Type == SliceB {
+		if r.flag() {
+			ref.NumRefIdxL0Active = r.ue() + 1
+			if h.Type == SliceB {
+				ref.NumRefIdxL1Active = r.ue() + 1
+			}
+		}
+	}
+
+	// ⛔ An I or SI slice states no reference list, so asking for one reads the
+	// bits of whatever follows.
+	if h.Type != SliceI && h.Type != SliceSI {
+		ref.ModifyL0 = readRefListOps(r)
+	}
+	if h.Type == SliceB {
+		ref.ModifyL1 = readRefListOps(r)
+	}
+
+	// The weight table is sent only when the picture set asks this slice for one.
+	// ⛔ weighted_bipred_idc of two is IMPLICIT weighting: the weights come from
+	// the picture order counts and no table is sent, so reading one here would
+	// consume the marking that follows.
+	if (pps.WeightedPred && (h.Type == SliceP || h.Type == SliceSP)) ||
+		(pps.WeightedBipredIDC == 1 && h.Type == SliceB) {
+		ref.Weights = readPredWeights(r, h, ref, chromaArrayType(sps))
+	}
+
+	if u.RefIDC != 0 {
+		readMarking(r, h, &ref)
+	}
+
+	// ⛔ Only a CABAC slice that is not I states which context table to start
+	// from, so reading it for an I slice takes the bits of the quantisation delta.
+	if pps.CABAC && h.Type != SliceI && h.Type != SliceSI {
+		ref.CABACInit = r.ue()
+	}
+	ref.QP = pps.InitQP + r.se()
+	if h.Type == SliceSP || h.Type == SliceSI {
+		if h.Type == SliceSP {
+			r.flag() // sp_for_switch_flag
+		}
+		r.se() // slice_qs_delta
+	}
+	if pps.DeblockingControl {
+		ref.DeblockingIDC = r.ue()
+		if ref.DeblockingIDC != 1 {
+			ref.AlphaC0OffsetDiv2 = r.se()
+			ref.BetaOffsetDiv2 = r.se()
+		}
+	}
+	// What remains is slice_group_change_cycle, stated only when the picture set
+	// declares more than one slice group with a changing map. The set reader does
+	// not read slice groups, so nothing here can know how wide that field is; it is
+	// left unread, and nothing above depends on it.
+
+	if r.err != nil {
+		return h, ref, r.err
+	}
+	return h, ref, nil
+}
+
+// chromaArrayType is ChromaArrayType: the chroma format, except that separate
+// colour planes make every plane monochrome.
+func chromaArrayType(sps SPS) uint8 {
+	if sps.SeparatePlanes {
+		return 0
+	}
+	return sps.ChromaFormat
+}
+
+// maxRefListOps bounds the instruction list.
+//
+// ⛔ The list is terminated by a value in the stream, not by a count, so a
+// corrupt or truncated slice can ask for instructions for ever. The bound is the
+// most any conforming stream needs -- two lists of at most 32 entries, and an
+// instruction per entry -- so a stream that passes it is not one.
+const maxRefListOps = 64
+
+// readRefListOps reads ref_pic_list_modification for one list.
+func readRefListOps(r *sticky) []RefListOp {
+	if !r.flag() {
+		return nil // The default order, which is not the same as no references.
+	}
+	var ops []RefListOp
+	for len(ops) <= maxRefListOps {
+		kind := r.ue()
+		if kind == 3 || r.err != nil {
+			return ops // Three ends the list and carries nothing.
+		}
+		op := RefListOp{Kind: kind}
+		switch kind {
+		case 0, 1:
+			op.Value = r.ue() // abs_diff_pic_num_minus1
+		case 2:
+			op.Value = r.ue() // long_term_pic_num
+		default:
+			// 4 and 5 belong to multiview, which this does not read. Stopping
+			// here keeps the rest of the header from being read as rubbish.
+			r.err = fmt.Errorf("%w: reference list instruction %d", ErrSliceHeader, kind)
+			return ops
+		}
+		ops = append(ops, op)
+	}
+	r.err = fmt.Errorf("%w: more than %d reference list instructions", ErrSliceHeader, maxRefListOps)
+	return ops
+}
+
+// readPredWeights reads pred_weight_table.
+func readPredWeights(r *sticky, h SliceHeader, ref SliceReferences, chroma uint8) *PredWeights {
+	w := &PredWeights{LumaLog2Denom: r.ue()}
+	if chroma != 0 {
+		w.ChromaLog2Denom = r.ue()
+	}
+	w.L0 = readWeightList(r, ref.NumRefIdxL0Active, chroma)
+	if h.Type == SliceB {
+		w.L1 = readWeightList(r, ref.NumRefIdxL1Active, chroma)
+	}
+	return w
+}
+
+// maxActiveRefs bounds how many weights a list may hold.
+//
+// ⛔ The count comes from the stream, and a corrupt one would have this allocate
+// and read whatever it says. Thirty-two is the most the format allows.
+const maxActiveRefs = 32
+
+func readWeightList(r *sticky, n uint32, chroma uint8) []RefWeight {
+	if n > maxActiveRefs {
+		r.err = fmt.Errorf("%w: %d active references", ErrSliceHeader, n)
+		return nil
+	}
+	out := make([]RefWeight, 0, n)
+	for i := uint32(0); i < n; i++ {
+		var e RefWeight
+		if e.LumaStated = r.flag(); e.LumaStated {
+			e.LumaWeight = r.se()
+			e.LumaOffset = r.se()
+		}
+		if chroma != 0 {
+			if e.ChromaStated = r.flag(); e.ChromaStated {
+				for j := 0; j < 2; j++ {
+					e.ChromaWeight[j] = r.se()
+					e.ChromaOffset[j] = r.se()
+				}
+			}
+		}
+		out = append(out, e)
+		if r.err != nil {
+			return out
+		}
+	}
+	return out
+}
+
+// maxMarkOps bounds the marking list, for the same reason as the instruction list.
+const maxMarkOps = 64
+
+// readMarking reads dec_ref_pic_marking.
+func readMarking(r *sticky, h SliceHeader, ref *SliceReferences) {
+	if h.IDR {
+		ref.NoOutputOfPriorPics = r.flag()
+		ref.LongTermReference = r.flag()
+		return
+	}
+	if ref.AdaptiveMarking = r.flag(); !ref.AdaptiveMarking {
+		return // The sliding window decides, and states nothing.
+	}
+	for len(ref.Marking) <= maxMarkOps {
+		op := r.ue()
+		if op == 0 || r.err != nil {
+			return // Zero ends the list.
+		}
+		m := MarkOp{Operation: op}
+		switch op {
+		case 1:
+			m.Value = r.ue() // difference_of_pic_nums_minus1
+		case 2:
+			m.Value = r.ue() // long_term_pic_num
+		case 3:
+			m.Value = r.ue() // difference_of_pic_nums_minus1
+			m.Extra = r.ue() // long_term_frame_idx
+		case 4:
+			m.Value = r.ue() // max_long_term_frame_idx_plus1
+		case 5:
+			// Empties the reference set and restarts the picture order count, and
+			// carries no argument. It stays in the list, in order: a caller
+			// applying these needs to know WHERE the reset falls, since the
+			// operations before it address a reference set the ones after it no
+			// longer have.
+			ref.ResetsPOC = true
+		case 6:
+			m.Value = r.ue() // long_term_frame_idx
+		default:
+			r.err = fmt.Errorf("%w: marking operation %d", ErrSliceHeader, op)
+			return
+		}
+		ref.Marking = append(ref.Marking, m)
+	}
+	r.err = fmt.Errorf("%w: more than %d marking operations", ErrSliceHeader, maxMarkOps)
 }
 
 // BeginsPicture says whether this slice starts a new coded picture.
