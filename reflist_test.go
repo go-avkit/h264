@@ -226,7 +226,7 @@ func TestAnInstructionMovesOnePictureAndClosesTheGapBehindIt(t *testing.T) {
 	// The current picture is frame 5; 4 has frame number 2, so the difference from
 	// the prediction (5) is 3, stated as a minus-one of 2.
 	ops := []RefListOp{{Kind: 0, Value: 2}}
-	got, err := ApplyRefListOps(list, ops, 4, 5, 16)
+	got, err := ApplyRefListOps(list, list, ops, 4, 5, 16)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestTheDifferenceBetweenInstructionsIsCumulative(t *testing.T) {
 	list := []RefPicture{pic(8, 4), pic(6, 3), pic(4, 2), pic(2, 1)}
 	// From 5: minus 1 names frame 4. Then from 4: minus 2 names frame 2.
 	ops := []RefListOp{{Kind: 0, Value: 0}, {Kind: 0, Value: 1}}
-	got, err := ApplyRefListOps(list, ops, 4, 5, 16)
+	got, err := ApplyRefListOps(list, list, ops, 4, 5, 16)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestAnInstructionCanNameAPictureAcrossTheWrap(t *testing.T) {
 		{ID: 14, POC: 28, FrameNum: 14},
 	}
 	ops := []RefListOp{{Kind: 0, Value: 1}}
-	got, err := ApplyRefListOps(list, ops, 3, 1, 16)
+	got, err := ApplyRefListOps(list, list, ops, 3, 1, 16)
 	if err != nil {
 		t.Fatalf("the wrap was not followed: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestAnInstructionCanNameAPictureAcrossTheWrap(t *testing.T) {
 
 func TestALongTermInstructionNamesItsOwnIndex(t *testing.T) {
 	list := []RefPicture{pic(8, 4), longPic(50, 2), longPic(51, 0)}
-	got, err := ApplyRefListOps(list, []RefListOp{{Kind: 2, Value: 2}}, 3, 5, 16)
+	got, err := ApplyRefListOps(list, list, []RefListOp{{Kind: 2, Value: 2}}, 3, 5, 16)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,43 +299,43 @@ func TestRefListRefusals(t *testing.T) {
 	list := []RefPicture{pic(8, 4), pic(6, 3)}
 	t.Run("a picture that is not held", func(t *testing.T) {
 		// From 5, minus 4 names frame 1, which is not in the list.
-		_, err := ApplyRefListOps(list, []RefListOp{{Kind: 0, Value: 3}}, 2, 5, 16)
+		_, err := ApplyRefListOps(list, list, []RefListOp{{Kind: 0, Value: 3}}, 2, 5, 16)
 		if !errors.Is(err, ErrRefLists) {
 			t.Errorf("err = %v, want ErrRefLists", err)
 		}
 	})
 	t.Run("a long-term index that is not held", func(t *testing.T) {
-		_, err := ApplyRefListOps(list, []RefListOp{{Kind: 2, Value: 7}}, 2, 5, 16)
+		_, err := ApplyRefListOps(list, list, []RefListOp{{Kind: 2, Value: 7}}, 2, 5, 16)
 		if !errors.Is(err, ErrRefLists) {
 			t.Errorf("err = %v, want ErrRefLists", err)
 		}
 	})
 	t.Run("an instruction this does not read", func(t *testing.T) {
-		_, err := ApplyRefListOps(list, []RefListOp{{Kind: 4}}, 2, 5, 16)
+		_, err := ApplyRefListOps(list, list, []RefListOp{{Kind: 4}}, 2, 5, 16)
 		if !errors.Is(err, ErrRefLists) {
 			t.Errorf("err = %v, want ErrRefLists", err)
 		}
 	})
 	t.Run("more instructions than positions", func(t *testing.T) {
 		ops := []RefListOp{{Kind: 0, Value: 0}, {Kind: 1, Value: 0}, {Kind: 0, Value: 0}}
-		_, err := ApplyRefListOps(list, ops, 1, 5, 16)
+		_, err := ApplyRefListOps(list, list, ops, 1, 5, 16)
 		if !errors.Is(err, ErrRefLists) {
 			t.Errorf("err = %v, want ErrRefLists", err)
 		}
 	})
 	t.Run("no reference at all", func(t *testing.T) {
-		_, err := ApplyRefListOps(nil, []RefListOp{{Kind: 0}}, 2, 5, 16)
+		_, err := ApplyRefListOps(nil, list, []RefListOp{{Kind: 0}}, 2, 5, 16)
 		if !errors.Is(err, ErrRefLists) {
 			t.Errorf("err = %v, want ErrRefLists", err)
 		}
 	})
 	t.Run("a negative count", func(t *testing.T) {
-		if _, err := ApplyRefListOps(list, nil, -1, 5, 16); !errors.Is(err, ErrRefLists) {
+		if _, err := ApplyRefListOps(list, list, nil, -1, 5, 16); !errors.Is(err, ErrRefLists) {
 			t.Errorf("err = %v, want ErrRefLists", err)
 		}
 	})
 	t.Run("no active reference wants no list", func(t *testing.T) {
-		got, err := ApplyRefListOps(list, nil, 0, 5, 16)
+		got, err := ApplyRefListOps(list, list, nil, 0, 5, 16)
 		if err != nil || got != nil {
 			t.Errorf("= %q, %v", order(got), err)
 		}
@@ -355,7 +355,7 @@ func TestRefListRefusals(t *testing.T) {
 // read as a picture of nothing -- a block of grey where a prediction belongs.
 func TestAListShorterThanItsActiveCountRepeats(t *testing.T) {
 	list := []RefPicture{pic(8, 4), pic(6, 3)}
-	got, err := ApplyRefListOps(list, nil, 4, 5, 16)
+	got, err := ApplyRefListOps(list, list, nil, 4, 5, 16)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestAnInstructionCanAlsoNameAPictureForward(t *testing.T) {
 	// not held. Walking DOWN first and then up is how a real list reaches forward.
 	// From 5: minus 3 names frame 2; then plus 1 names frame 3.
 	ops := []RefListOp{{Kind: 0, Value: 2}, {Kind: 1, Value: 0}}
-	got, err := ApplyRefListOps(list, ops, 4, 5, 16)
+	got, err := ApplyRefListOps(list, list, ops, 4, 5, 16)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +418,7 @@ func TestTheForwardDifferenceWrapsAtTheTopOfTheCycle(t *testing.T) {
 		{ID: 0, POC: 32, FrameNum: 0},
 	}
 	ops := []RefListOp{{Kind: 0, Value: 0}, {Kind: 1, Value: 2}}
-	got, err := ApplyRefListOps(list, ops, 3, 14, 16)
+	got, err := ApplyRefListOps(list, list, ops, 3, 14, 16)
 	if err != nil {
 		t.Fatalf("the forward wrap was not followed: %v", err)
 	}
@@ -428,5 +428,50 @@ func TestTheForwardDifferenceWrapsAtTheTopOfTheCycle(t *testing.T) {
 			ids = append(ids, r.ID)
 		}
 		t.Errorf("order by identity = %v, want 13 then 0", ids)
+	}
+}
+
+// TestAPictureDisplacedFromTheListIsStillAReference.
+//
+// ⛔ A list modification instruction names a picture in the REFERENCE SET, not in
+// the list it is rewriting. The list is only num_ref_idx_active + 1 entries long,
+// and placing a picture shifts the rest down -- which pushes the last entry off
+// the end. A second instruction naming that entry then finds nothing, although the
+// set still holds it, and §8.2.4.3.1 selects "the short-term reference picture with
+// PicNum equal to picNumLX" from the pictures marked as used for reference.
+//
+// Measured: picture 15 of one real stream is a P slice with frame_num 12 holding
+// frames 8, 9, 10 and 11, two active entries, and the instructions below. It asks
+// for frame 11 and then for frame 9. Searching the working list refused the second
+// with "short-term picture 9 is not held" on a stream ffmpeg decodes without
+// complaint.
+func TestAPictureDisplacedFromTheListIsStillAReference(t *testing.T) {
+	refs := []RefPicture{
+		{ID: 8, FrameNum: 8, POC: 16},
+		{ID: 9, FrameNum: 9, POC: 18},
+		{ID: 10, FrameNum: 10, POC: 20},
+		{ID: 11, FrameNum: 11, POC: 22},
+	}
+	const currPicNum, maxPicNum, active = 12, 16, 2
+	l0, _, err := InitialRefLists(
+		SliceHeader{Type: SliceP}, refs, 24, currPicNum, maxPicNum)
+	if err != nil {
+		t.Fatalf("initial list: %v", err)
+	}
+	// The instructions as the stream states them: subtract 1, then subtract 2.
+	ops := []RefListOp{{Kind: 0, Value: 0}, {Kind: 0, Value: 1}}
+	got, err := ApplyRefListOps(l0, refs, ops, active, currPicNum, maxPicNum)
+	if err != nil {
+		t.Fatalf("the stream asks for frames 11 and 9 and the set holds both: %v", err)
+	}
+	want := []uint32{11, 9}
+	if len(got) != len(want) {
+		t.Fatalf("list of %d entries, want %d: %+v", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i].FrameNum != w {
+			t.Errorf("entry %d is frame %d, want %d (whole list %+v)",
+				i, got[i].FrameNum, w, got)
+		}
 	}
 }

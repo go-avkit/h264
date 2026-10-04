@@ -152,15 +152,24 @@ func sameList(a, b []RefPicture) bool {
 
 // ApplyRefListOps rewrites a list the way a slice's instructions ask.
 //
-// active is num_ref_idx_lX_active: the length the list must have when this
-// returns. maxPicNum is 1 << log2_max_frame_num for a frame-coded picture, and
-// currPicNum is the slice's own frame number.
+// list is the list to rewrite and refs is the whole reference set. active is
+// num_ref_idx_lX_active: the length the list must have when this returns.
+// maxPicNum is 1 << log2_max_frame_num for a frame-coded picture, and currPicNum
+// is the slice's own frame number.
+//
+// ⛔ A picture an instruction names is looked for in the REFERENCE SET, not in the
+// list being rewritten. The list is only as long as the slice is active plus one,
+// and the first instruction's shift pushes its last entry off the end -- so a
+// second instruction naming that picture finds nothing. Measured on a real stream:
+// a P slice holding frames 8, 9, 10 and 11 asked for 11 and then for 9, and
+// searching the list refused the second because placing the first had already
+// dropped it.
 //
 // ⛔ The list is active+1 long while the instructions are applied, and is cut back
 // at the end. The format says so, and it matters: an instruction that moves a
 // picture forward needs somewhere to put the one it displaces, and a reader
 // working in a fixed-length list drops that picture instead.
-func ApplyRefListOps(list []RefPicture, ops []RefListOp, active int,
+func ApplyRefListOps(list, refs []RefPicture, ops []RefListOp, active int,
 	currPicNum uint32, maxPicNum uint32) ([]RefPicture, error) {
 	if active < 0 {
 		return nil, fmt.Errorf("%w: %d active references", ErrRefLists, active)
@@ -207,7 +216,7 @@ func ApplyRefListOps(list []RefPicture, ops []RefListOp, active int,
 		default:
 			return nil, fmt.Errorf("%w: instruction %d", ErrRefLists, op.Kind)
 		}
-		if err := place(work, at, matches, describe); err != nil {
+		if err := place(work, refs, at, matches, describe); err != nil {
 			return nil, err
 		}
 		at++
@@ -249,9 +258,12 @@ func shortPicNum(op RefListOp, pred, currPicNum, maxPicNum int32) (picNum, next 
 // It is written as the three loops the format states rather than rebuilt from
 // parts, because the thing that is easy to get wrong here is WHICH entries the
 // closing pass walks -- it starts after the inserted picture, not at the front.
-func place(work []RefPicture, at int, matches func(RefPicture) bool, describe string) error {
+func place(work, refs []RefPicture, at int, matches func(RefPicture) bool, describe string) error {
+	// ⛔ Searched in the reference set. See ApplyRefListOps: the working list is
+	// too short to be searched, and a picture already displaced from it is still a
+	// reference the slice may name.
 	picked, found := RefPicture{}, false
-	for _, r := range work {
+	for _, r := range refs {
 		if matches(r) {
 			picked, found = r, true
 			break
