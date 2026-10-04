@@ -22,6 +22,23 @@ type Weighting struct {
 // format falls back to whenever a derivation cannot be trusted.
 var DefaultWeighting = Weighting{LogDenom: 5, W0: 32, W1: 32}
 
+// Trivial reports whether this weighting leaves the prediction alone: each weight
+// is one, in its own denominator, and neither offset moves anything.
+//
+// ⛔ It is NOT the same as being equal to DefaultWeighting. A slice may state the
+// identity weighting in any denominator it likes -- a weight of 1 against a
+// denominator of 0, or 64 against 6, are both exactly one -- and a caller
+// comparing structures calls those weighted. Measured: of 18 P slices in one real
+// stream, 8 state the identity this way, and ffmpeg reports all 8 as unweighted
+// while a comparison against DefaultWeighting reported all 8 as weighted.
+//
+// A decoder uses it to skip the weighted path, which is the reason it is here
+// rather than in whatever asked the question.
+func (w Weighting) Trivial() bool {
+	unit := int32(1) << uint(w.LogDenom)
+	return w.O0 == 0 && w.O1 == 0 && w.W0 == unit && w.W1 == unit
+}
+
 // clip3 is the format's own clamp, written once because it appears in every
 // derivation below and a hand-inlined version of it is where an off-by-one hides.
 func clip3(low, high, v int32) int32 {

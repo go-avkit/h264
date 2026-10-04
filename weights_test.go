@@ -277,3 +277,46 @@ func TestTheModeIsChosenInOnePlace(t *testing.T) {
 		}
 	}
 }
+
+// TestTheIdentityWeightingIsRecognisedInAnyDenominator.
+//
+// ⛔ Being equal to DefaultWeighting is not the same as leaving the prediction
+// alone. A slice states the identity in whatever denominator it likes: a weight of
+// 1 against a denominator of 0, or 64 against 6, are both exactly one. Measured, of
+// 18 P slices in one real stream 8 state it as denominator 0 with nothing else, and
+// a comparison against DefaultWeighting called all 8 of them weighted while ffmpeg
+// called all 8 unweighted.
+func TestTheIdentityWeightingIsRecognisedInAnyDenominator(t *testing.T) {
+	for _, w := range []Weighting{
+		{LogDenom: 0, W0: 1, W1: 1},
+		{LogDenom: 5, W0: 32, W1: 32},
+		{LogDenom: 6, W0: 64, W1: 64},
+		{LogDenom: 7, W0: 128, W1: 128},
+		DefaultWeighting,
+	} {
+		if !w.Trivial() {
+			t.Errorf("%+v leaves the prediction alone and was called weighted", w)
+		}
+	}
+	for _, w := range []Weighting{
+		{LogDenom: 5, W0: 33, W1: 32},
+		{LogDenom: 5, W0: 32, W1: 31},
+		{LogDenom: 5, W0: 32, W1: 32, O0: 1},
+		{LogDenom: 5, W0: 32, W1: 32, O1: -1},
+		{LogDenom: 6, W0: 73, W1: 64},
+		{LogDenom: 0, W0: 2, W1: 1},
+	} {
+		if w.Trivial() {
+			t.Errorf("%+v changes the prediction and was called trivial", w)
+		}
+	}
+	// And the one a real stream sends: a denominator of nought and an entry that
+	// states nothing.
+	silent := ExplicitWeighting(&PredWeights{LumaLog2Denom: 0, L0: []RefWeight{{}}}, 0, -1)
+	if !silent.Trivial() {
+		t.Errorf("a table stating nothing at denominator 0 gave %+v", silent)
+	}
+	if silent == DefaultWeighting {
+		t.Error("the fixture is equal to DefaultWeighting, so it cannot tell the two tests apart")
+	}
+}
