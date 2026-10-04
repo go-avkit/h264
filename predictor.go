@@ -107,5 +107,35 @@ func (p *Predictor) Picture(u Unit, h SliceHeader, ref SliceReferences,
 	if err != nil {
 		return Prediction{}, err
 	}
-	return Prediction{POC: poc, L0: l0, L1: l1, Handle: handle}, nil
+	return Prediction{
+		POC:    poc,
+		L0:     first(l0, ref.NumRefIdxL0Active),
+		L1:     first(l1, ref.NumRefIdxL1Active),
+		Handle: handle,
+	}, nil
+}
+
+// first is the list a slice can actually index: its first active entries.
+//
+// ⛔ The initial lists are built from the WHOLE set -- 8.2.4.2 orders every
+// reference picture held, and 8.2.4.2.1 then discards "the extra entries beyond
+// position num_ref_idx_lX_active_minus1". Without this, Prediction carried the
+// ordering rather than the list: measured on a 14-picture stream whose every
+// slice declares one active reference, L0 and L1 each held THREE entries. The
+// first was right, so a caller reading L0[ref_idx] saw nothing wrong, while one
+// asking len(L0) was told the slice had three references to choose from when
+// the bitstream gives ref_idx one value.
+//
+// It was also INCONSISTENT, which is worse than either answer: ApplyRefListOps
+// truncates, so the length depended on whether the slice happened to state a
+// modification.
+//
+// A list shorter than active is left as it is. 8.2.4.2.1 leaves those entries
+// unspecified -- there is no picture to put there -- and padding would invent a
+// reference.
+func first(list []RefPicture, active uint32) []RefPicture {
+	if uint32(len(list)) <= active {
+		return list
+	}
+	return list[:active]
 }

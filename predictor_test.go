@@ -275,3 +275,75 @@ func TestResetForgetsBothHalvesOfTheState(t *testing.T) {
 		t.Fatalf("it predicts from %s; the set was emptied", names(again.L0))
 	}
 }
+
+// TestAPredictionCarriesTheListTheSliceCanIndex.
+//
+// ⛔ Not the ordering it was built from. Clause 8.2.4.2 orders every reference
+// picture held, and 8.2.4.2.1 then discards "the extra entries beyond position
+// num_ref_idx_lX_active_minus1". Measured on a real 14-picture stream whose
+// every slice declares ONE active reference: L0 and L1 each carried three
+// entries. The first was right, so a caller reading L0[ref_idx] saw nothing
+// wrong -- while one asking len(L0) was told the slice had three references to
+// choose from when the bitstream gives ref_idx exactly one value.
+//
+// ⛔ And it was INCONSISTENT, which is worse than either answer on its own:
+// ApplyRefListOps truncates, so the length depended on whether the slice
+// happened to state a modification. Two slices of the same picture could
+// disagree about how long the list is.
+func TestAPredictionCarriesTheListTheSliceCanIndex(t *testing.T) {
+	p := NewPredictor()
+	mustOffer(t, p, coded{idr: true, refIDC: 3, kind: SliceI})
+	for i := uint32(1); i <= 3; i++ {
+		mustOffer(t, p, coded{frameNum: i, refIDC: 2, kind: SliceP, pocLSB: 2 * i})
+	}
+	if n := len(p.Held()); n != 4 {
+		t.Fatalf("the set holds %d pictures, want 4", n)
+	}
+
+	// Four pictures held, one active reference declared.
+	one := mustOffer(t, p, coded{frameNum: 4, refIDC: 2, kind: SliceP, pocLSB: 8,
+		activeL0: 1, activeL1: 1})
+	if len(one.L0) != 1 {
+		t.Fatalf("list 0 holds %d entries for a slice declaring 1: %s",
+			len(one.L0), names(one.L0))
+	}
+	if got := names(one.L0); got != "[f3/3]" {
+		t.Fatalf("list 0 is %s, want [f3/3] -- the nearest reference", got)
+	}
+
+	// A B slice declaring one on each side.
+	b := mustOffer(t, p, coded{frameNum: 5, refIDC: 2, kind: SliceB, pocLSB: 20,
+		activeL0: 1, activeL1: 1})
+	if len(b.L0) != 1 || len(b.L1) != 1 {
+		t.Fatalf("a B slice declaring 1/1 got %d/%d entries: %s and %s",
+			len(b.L0), len(b.L1), names(b.L0), names(b.L1))
+	}
+
+	// ⛔ A list SHORTER than the slice declares is left alone. 8.2.4.2.1 leaves
+	// those entries unspecified -- there is no picture to put there -- and
+	// padding would invent a reference the stream never named.
+	fresh := NewPredictor()
+	mustOffer(t, fresh, coded{idr: true, refIDC: 3, kind: SliceI})
+	short := mustOffer(t, fresh, coded{frameNum: 1, refIDC: 2, kind: SliceP,
+		pocLSB: 2, activeL0: 4})
+	if len(short.L0) != 1 {
+		t.Fatalf("one picture is held and the slice declares 4; list 0 holds %d: %s",
+			len(short.L0), names(short.L0))
+	}
+
+	// And the modified path agrees with the unmodified one about the length,
+	// which is the inconsistency this fixes.
+	p2 := NewPredictor()
+	mustOffer(t, p2, coded{idr: true, refIDC: 3, kind: SliceI})
+	for i := uint32(1); i <= 3; i++ {
+		mustOffer(t, p2, coded{frameNum: i, refIDC: 2, kind: SliceP, pocLSB: 2 * i})
+	}
+	plain := mustOffer(t, p2, coded{frameNum: 4, refIDC: 2, kind: SliceP,
+		pocLSB: 8, activeL0: 2})
+	modified := mustOffer(t, p2, coded{frameNum: 5, refIDC: 2, kind: SliceP,
+		pocLSB: 10, activeL0: 2, modifyL0: []RefListOp{{Kind: 0, Value: 0}}})
+	if len(plain.L0) != len(modified.L0) {
+		t.Fatalf("a slice stating no modification gets %d entries and one stating "+
+			"a modification gets %d; both declare 2", len(plain.L0), len(modified.L0))
+	}
+}
