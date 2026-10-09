@@ -85,7 +85,13 @@ func ParseSPS(u Unit) (SPS, error) {
 		}
 	}
 
-	s.Log2MaxFrameNum = uint8(r.ue()) + 4
+	// ⛔ A BIT COUNT: the slice header reads frame_num with it, so a reader
+	// given a wrong one is misaligned from that field on.
+	n, err := narrowed(r, "log2_max_frame_num_minus4", 12)
+	if err != nil {
+		return s, err
+	}
+	s.Log2MaxFrameNum = n + 4
 	if err := s.readPicOrderCnt(r); err != nil {
 		return s, err
 	}
@@ -130,8 +136,15 @@ func (s *SPS) readHighProfile(r *sticky) error {
 	if s.ChromaFormat == 3 {
 		s.SeparatePlanes = r.flag()
 	}
-	s.BitDepthLuma = uint8(r.ue()) + 8
-	s.BitDepthChroma = uint8(r.ue()) + 8
+	bdY, err := narrowed(r, "bit_depth_luma_minus8", 6)
+	if err != nil {
+		return err
+	}
+	bdC, err := narrowed(r, "bit_depth_chroma_minus8", 6)
+	if err != nil {
+		return err
+	}
+	s.BitDepthLuma, s.BitDepthChroma = bdY+8, bdC+8
 	r.bit() // qpprime_y_zero_transform_bypass_flag
 	if r.flag() {
 		// ⛔ The scaling matrices are the one variable-length part of an SPS, and
@@ -180,7 +193,11 @@ func (s *SPS) readPicOrderCnt(r *sticky) error {
 	s.POCType = r.ue()
 	switch t := s.POCType; t {
 	case 0:
-		s.Log2MaxPOCLSB = uint8(r.ue()) + 4
+		n, err := narrowed(r, "log2_max_pic_order_cnt_lsb_minus4", 12)
+		if err != nil {
+			return err
+		}
+		s.Log2MaxPOCLSB = n + 4
 	case 1:
 		s.POCAlwaysZero = r.flag()
 		r.se() // offset_for_non_ref_pic
@@ -239,4 +256,22 @@ func (s *SPS) size() {
 	}
 	s.Width -= cropX * (s.CropLeft + s.CropRight)
 	s.Height -= cropY * (s.CropTop + s.CropBottom)
+}
+
+// narrowed reads a field that is kept in a byte, and refuses it before the
+// conversion that would narrow it.
+//
+// ⛔ A narrowing conversion does not merely lose a value, it maps out-of-range
+// values ONTO LEGAL ONES: uint8(1048576) is 0, so a check made afterwards does
+// not fail loudly, it PASSES. Every one of these is a width or a depth that
+// something later reads a field with.
+func narrowed(r *sticky, name string, hi uint32) (uint8, error) {
+	v := r.ue()
+	if r.err != nil {
+		return 0, r.err
+	}
+	if v > hi {
+		return 0, fmt.Errorf("%w: %s of %d, at most %d", ErrUnsupportedSPS, name, v, hi)
+	}
+	return uint8(v), nil
 }

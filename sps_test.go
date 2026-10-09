@@ -68,6 +68,13 @@ type set struct {
 	mapUnits     uint32
 	frameMBSOnly bool
 	crop         [4]uint32 // left, right, top, bottom
+	// These four are kept in a BYTE after being read, so a test can state one
+	// the format does not allow and watch the conversion narrow it onto a
+	// legal value.
+	frameNumMinus4 uint32
+	pocLSBMinus4   uint32
+	bdLuma         uint32
+	bdChroma       uint32
 }
 
 // build writes s as a NAL unit, header byte and all.
@@ -82,8 +89,8 @@ func (s set) build() Unit {
 		if s.chroma == 3 {
 			w.bit(0) // separate_colour_plane_flag
 		}
-		w.ue(0) // bit_depth_luma_minus8
-		w.ue(0) // bit_depth_chroma_minus8
+		w.ue(s.bdLuma)   // bit_depth_luma_minus8
+		w.ue(s.bdChroma) // bit_depth_chroma_minus8
 		w.bit(0)
 		if s.scaling {
 			w.bit(1)
@@ -106,11 +113,11 @@ func (s set) build() Unit {
 			w.bit(0)
 		}
 	}
-	w.ue(0) // log2_max_frame_num_minus4
+	w.ue(s.frameNumMinus4) // log2_max_frame_num_minus4
 	w.ue(s.pocType)
 	switch s.pocType {
 	case 0:
-		w.ue(0)
+		w.ue(s.pocLSBMinus4)
 	case 1:
 		w.bit(0)
 		w.se(0)
@@ -381,5 +388,53 @@ func TestTheEscapingIsUndoneBeforeAnyFieldIsRead(t *testing.T) {
 	}
 	if got != want {
 		t.Errorf("escaped set read as %+v, want %+v", got, want)
+	}
+}
+
+// TestAWidthCheckedAfterTheCastThatWraps.
+//
+// ⛔ log2_max_frame_num_minus4 and log2_max_pic_order_cnt_lsb_minus4 are BIT
+// COUNTS: the slice header reads frame_num and the order count with them, so a
+// reader given a wrong one is misaligned from that field on. Each was narrowed
+// to a byte with NO bound at all.
+//
+// A narrowing conversion does not merely lose the value, it maps out-of-range
+// values ONTO LEGAL ONES -- uint8(1048576) is 0, and uint8(256)+4 is 4, the
+// smallest width the format allows. A check made after it would pass them.
+func TestAWidthCheckedAfterTheCastThatWraps(t *testing.T) {
+	base := func() set {
+		return set{profile: 100, level: 30, chroma: 1, mbWidth: 2, mapUnits: 2, frameMBSOnly: true}
+	}
+	for _, c := range []struct {
+		name  string
+		apply func(*set)
+	}{
+		{"a frame number width one past the range", func(s *set) { s.frameNumMinus4 = 13 }},
+		{"a frame number width wrapping to the smallest", func(s *set) { s.frameNumMinus4 = 256 }},
+		{"a frame number width a million past", func(s *set) { s.frameNumMinus4 = 1 << 20 }},
+		{"an order count width one past the range", func(s *set) { s.pocLSBMinus4 = 13 }},
+		{"an order count width wrapping to zero", func(s *set) { s.pocLSBMinus4 = 252 }},
+		{"a luma depth one past the range", func(s *set) { s.bdLuma = 7 }},
+		{"a luma depth wrapping to zero", func(s *set) { s.bdLuma = 256 }},
+		{"a chroma depth a million past", func(s *set) { s.bdChroma = 1 << 20 }},
+	} {
+		s := base()
+		c.apply(&s)
+		if _, err := ParseSPS(s.build()); !errors.Is(err, ErrUnsupportedSPS) {
+			t.Errorf("%s: err = %v, want ErrUnsupportedSPS", c.name, err)
+		}
+	}
+
+	// The largest each one allows must be READ: a bound one too tight refuses
+	// conformant sequences.
+	s := base()
+	s.frameNumMinus4, s.pocLSBMinus4, s.bdLuma, s.bdChroma = 12, 12, 6, 6
+	sps, err := ParseSPS(s.build())
+	if err != nil {
+		t.Fatalf("the largest conformant widths were refused: %v", err)
+	}
+	if sps.Log2MaxFrameNum != 16 || sps.Log2MaxPOCLSB != 16 || sps.BitDepthLuma != 14 {
+		t.Errorf("widths %d/%d, depth %d; want 16/16 and 14",
+			sps.Log2MaxFrameNum, sps.Log2MaxPOCLSB, sps.BitDepthLuma)
 	}
 }
