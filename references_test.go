@@ -527,7 +527,12 @@ func TestALongListIsBoundedRatherThanEndless(t *testing.T) {
 }
 
 // TestTooManyActiveReferencesIsRefused: the count comes from the stream, and a
-// corrupt one would have the weight table allocated and read to whatever it says.
+// corrupt one would have a reader allocate and read to whatever it says.
+//
+// ⛔ This used to expect ErrSliceHeader, from the bound inside readWeightList.
+// The refusal now comes from the slice header itself, EARLIER and for every
+// consumer of the count -- a slice stating no weight table never reached the
+// old one.
 func TestTooManyActiveReferencesIsRefused(t *testing.T) {
 	sps, pps := refSets()
 	w := &spsWriter{}
@@ -542,8 +547,8 @@ func TestTooManyActiveReferencesIsRefused(t *testing.T) {
 	w.ue(5)                     // luma denominator
 	w.bits(0xAB, 8)
 	u := Unit{Type: UnitNonIDR, RefIDC: 2, Payload: w.data}
-	if _, _, err := ParseSliceReferences(u, sps, pps); !errors.Is(err, ErrSliceHeader) {
-		t.Errorf("err = %v, want ErrSliceHeader", err)
+	if _, _, err := ParseSliceReferences(u, sps, pps); !errors.Is(err, ErrRefIdxRange) {
+		t.Errorf("err = %v, want ErrRefIdxRange", err)
 	}
 }
 

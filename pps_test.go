@@ -11,6 +11,12 @@ import (
 // pset describes the picture parameter set a test wants written.
 type pset struct {
 	cabac        bool
+	refIdxMinus1 uint32
+	// refIdxWideN writes the num_ref_idx fields as a raw exp-Golomb code with n
+	// leading zeros instead of ue(refIdxMinus1). ⛔ spsWriter.ue cannot emit
+	// 2^32-1, and that is the one value the +1 the syntax carries wraps on, so
+	// the writer cannot reach it by itself.
+	refIdxWideN  int
 	sliceGroups  uint32 // num_slice_groups_minus1
 	chromaOffset int32
 	tail         bool // state the optional trailing part
@@ -31,8 +37,19 @@ func (p pset) build() Unit {
 	}
 	w.bit(0) // bottom_field_pic_order_in_frame_present_flag
 	w.ue(p.sliceGroups)
-	w.ue(0) // num_ref_idx_l0_default_active_minus1
-	w.ue(0) // num_ref_idx_l1_default_active_minus1
+	for i := 0; i < 2; i++ { // num_ref_idx_l0/l1_default_active_minus1
+		if n := p.refIdxWideN; n > 0 {
+			for j := 0; j < n; j++ {
+				w.bit(0)
+			}
+			w.bit(1)
+			for j := 0; j < n; j++ {
+				w.bit(0)
+			}
+			continue
+		}
+		w.ue(p.refIdxMinus1)
+	}
 	w.bit(0)
 	w.bits(0, 2) // weighted_bipred_idc
 	w.se(-1)     // pic_init_qp_minus26
@@ -277,5 +294,38 @@ func TestPaddingWithNoLeadingOneIsRefused(t *testing.T) {
 	}
 	if _, err := ParsePPS(Unit{Type: UnitPPS, Payload: data}, SPS{ChromaFormat: 1}); err == nil {
 		t.Error("a payload closed with zeros instead of a one was accepted")
+	}
+}
+
+func TestPPSRefusesAnOversizedRefIdx(t *testing.T) {
+	// 7.4.2.2 puts num_ref_idx_lX_default_active_minus1 in 0..31. The boundary
+	// is pinned on BOTH sides: an off-by-one either refuses conformant streams
+	// or leaves the hole open.
+	for _, c := range []struct {
+		minus1 uint32
+		wideN  int
+		refuse bool
+	}{
+		{minus1: 0},
+		{minus1: 31}, // the largest conformant value: 32 active entries
+		{minus1: 32, refuse: true},
+		{minus1: 1 << 20, refuse: true},
+		{minus1: 1<<32 - 2, refuse: true},
+		// ⛔ 2^32-1, hand-written: the +1 the syntax carries wraps it to ZERO,
+		// so a bound applied after the increment lets exactly this one past --
+		// and the set then claims a list of no entries at all.
+		{wideN: 32, refuse: true},
+	} {
+		u := pset{refIdxMinus1: c.minus1, refIdxWideN: c.wideN}.build()
+		pps, err := ParsePPS(u, SPS{})
+		switch {
+		case c.refuse && !errors.Is(err, ErrRefIdxRange):
+			t.Errorf("minus1=%d wideN=%d in %d bytes: got %v (NumRefIdxL0=%d), want ErrRefIdxRange",
+				c.minus1, c.wideN, len(u.Payload), err, pps.NumRefIdxL0)
+		case !c.refuse && err != nil:
+			t.Errorf("minus1=%d: got %v, want it read", c.minus1, err)
+		case !c.refuse && pps.NumRefIdxL0 != c.minus1+1:
+			t.Errorf("minus1=%d: NumRefIdxL0=%d, want %d", c.minus1, pps.NumRefIdxL0, c.minus1+1)
+		}
 	}
 }

@@ -290,9 +290,24 @@ func parseSlice(u Unit, sps SPS, pps PPS, wantRefs bool) (SliceHeader, SliceRefe
 	ref.NumRefIdxL0Active, ref.NumRefIdxL1Active = pps.NumRefIdxL0, pps.NumRefIdxL1
 	if h.Type == SliceP || h.Type == SliceSP || h.Type == SliceB {
 		if r.flag() {
-			ref.NumRefIdxL0Active = r.ue() + 1
+			// ⛔ A slice may override the set's counts, so bounding the set
+			// alone leaves this door open. Read before the +1, for the same
+			// reason as there.
+			l0 := r.ue()
+			l1 := uint32(0)
 			if h.Type == SliceB {
-				ref.NumRefIdxL1Active = r.ue() + 1
+				l1 = r.ue()
+			}
+			if r.err == nil && (l0 >= maxActiveRefs || l1 >= maxActiveRefs) {
+				// The reader is sticky, so this is carried to the check at the
+				// end. The counts are LEFT at the set's, which are bounded, so
+				// nothing between here and there sizes anything from these.
+				r.err = fmt.Errorf("%w: %d and %d", ErrRefIdxRange, l0, l1)
+			} else {
+				ref.NumRefIdxL0Active = l0 + 1
+				if h.Type == SliceB {
+					ref.NumRefIdxL1Active = l1 + 1
+				}
 			}
 		}
 	}
@@ -408,17 +423,22 @@ func readPredWeights(r *sticky, h SliceHeader, ref SliceReferences, chroma uint8
 	return w
 }
 
-// maxActiveRefs bounds how many weights a list may hold.
+// maxActiveRefs bounds how many active references anything here will size from.
 //
-// ⛔ The count comes from the stream, and a corrupt one would have this allocate
-// and read whatever it says. Thirty-two is the most the format allows.
+// ⛔ The count comes from the stream, and a corrupt one would have a reader
+// allocate and read whatever it says. Thirty-two is the most the format allows.
+//
+// ⛔ This used to be applied in readWeightList ALONE, and its own comment said
+// so -- "how many weights a list may hold". A bound is only as wide as what it
+// is applied to: a slice that stated no weights carried the count straight to
+// ApplyRefListOps, which sized an allocation from it.
 const maxActiveRefs = 32
 
 func readWeightList(r *sticky, n uint32, chroma uint8) []RefWeight {
-	if n > maxActiveRefs {
-		r.err = fmt.Errorf("%w: %d active references", ErrSliceHeader, n)
-		return nil
-	}
+	// The bound that used to stand here is applied where the count is READ --
+	// in the parameter set and in the slice header's override -- so n cannot
+	// arrive out of range any more. Kept here it was unreachable, which a
+	// coverage gate says plainly and a reader does not.
 	out := make([]RefWeight, 0, n)
 	for i := uint32(0); i < n; i++ {
 		var e RefWeight

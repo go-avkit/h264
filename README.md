@@ -42,6 +42,7 @@ streams** and on **all 65536 implicit-weight pairs** — see below.
 | `InitialRefLists`, `ApplyRefListOps` | the reference lists and their modifications (§8.2.4) |
 | `ImplicitWeighting`, `ExplicitWeighting`, `WeightingFor`, `DistScaleFactor` | the prediction weights (§8.4.2.3) |
 | `Predictor` | the five above, composed in the one order that is correct |
+| `ErrRefIdxRange` | a set or a slice stating more active references than a list may hold |
 
 **Order count type 1 is not derived.** It needs `offset_for_ref_frame` and its
 cycle, which the set reader does not read, so `POCCounter` returns `ErrPOCType`
@@ -54,6 +55,23 @@ hand back a set that is quietly wrong.
 
 **Windows, macOS, Linux; six 64-bit architectures.** 100% statement coverage per
 function, gated in CI.
+
+## A count from the stream sizes an allocation
+
+⛔ **`num_ref_idx_lX_active_minus1` is a 32-bit syntax element and a reference
+entry is 24 bytes.** An 18-byte picture parameter set states 4 294 967 295 of
+them. The allocation in `ApplyRefListOps` was measured linear — 1 Mi entries for
+25.2 MB, 10 Mi for 251.7 MB — so that set asks for about 103 GB.
+
+7.4.2.2 puts the field in 0..31. The bound is applied where the count is
+**read**: in `ParsePPS` and in the slice header's own override. It used to live
+in `readWeightList` alone, whose comment said as much — "how many weights a list
+may hold" — and a slice that stated no weight table carried the count straight
+past it to the list construction.
+
+The check is made on the value **before** the `+1` the syntax carries: at the
+top of the range that increment wraps to zero, and a set claiming a list of no
+entries would read as conformant.
 
 ## How it is verified
 
