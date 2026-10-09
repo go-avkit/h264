@@ -410,17 +410,52 @@ func readRefListOps(r *sticky) []RefListOp {
 	return ops
 }
 
+// maxLog2WeightDenom is the largest shift 7.4.3.2 allows for either component.
+//
+// ⛔ The denominator is a SHIFT COUNT that leaves this package: Weighting
+// computes 1 << LogDenom and shifts a sample by it. A count the stream chose
+// freely is a shift by whatever it likes, and in Go that is not a panic -- it
+// is a silently wrong number.
+const maxLog2WeightDenom = 7
+
+// maxWeightMagnitude bounds a weight and an offset, 7.4.3.2: each is stated in
+// -128..127, and every decoder reads them into eight bits.
+//
+// ⛔ Unbounded, a weight multiplies a sample before anything clamps it. 2^30
+// times a sample overflows the arithmetic rather than making a bright picture.
+const maxWeightMagnitude = 128
+
 // readPredWeights reads pred_weight_table.
 func readPredWeights(r *sticky, h SliceHeader, ref SliceReferences, chroma uint8) *PredWeights {
 	w := &PredWeights{LumaLog2Denom: r.ue()}
 	if chroma != 0 {
 		w.ChromaLog2Denom = r.ue()
 	}
+	if r.err == nil && (w.LumaLog2Denom > maxLog2WeightDenom || w.ChromaLog2Denom > maxLog2WeightDenom) {
+		r.err = fmt.Errorf("%w: weight denominators of %d and %d",
+			ErrSliceHeader, w.LumaLog2Denom, w.ChromaLog2Denom)
+		return nil
+	}
 	w.L0 = readWeightList(r, ref.NumRefIdxL0Active, chroma)
 	if h.Type == SliceB {
 		w.L1 = readWeightList(r, ref.NumRefIdxL1Active, chroma)
 	}
 	return w
+}
+
+// weightInRange refuses a weight or an offset the arithmetic cannot carry.
+//
+// ⛔ It does NOT stand down when the reader has already failed, and does not
+// need to: a failing read returns zero, which is in range, so a truncated
+// stream is reported as truncation rather than as a value it never carried.
+// TestAFailedReadReturnsZero holds that, because removing a guard on a
+// measurement makes the measurement part of the contract.
+func weightInRange(r *sticky, name string, v int32) bool {
+	if v < -maxWeightMagnitude || v >= maxWeightMagnitude {
+		r.err = fmt.Errorf("%w: a %s of %d", ErrSliceHeader, name, v)
+		return false
+	}
+	return true
 }
 
 // maxActiveRefs bounds how many active references anything here will size from.
@@ -445,12 +480,20 @@ func readWeightList(r *sticky, n uint32, chroma uint8) []RefWeight {
 		if e.LumaStated = r.flag(); e.LumaStated {
 			e.LumaWeight = r.se()
 			e.LumaOffset = r.se()
+			if !weightInRange(r, "luma weight", e.LumaWeight) ||
+				!weightInRange(r, "luma offset", e.LumaOffset) {
+				return out
+			}
 		}
 		if chroma != 0 {
 			if e.ChromaStated = r.flag(); e.ChromaStated {
 				for j := 0; j < 2; j++ {
 					e.ChromaWeight[j] = r.se()
 					e.ChromaOffset[j] = r.se()
+					if !weightInRange(r, "chroma weight", e.ChromaWeight[j]) ||
+						!weightInRange(r, "chroma offset", e.ChromaOffset[j]) {
+						return out
+					}
 				}
 			}
 		}

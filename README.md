@@ -73,6 +73,22 @@ The check is made on the value **before** the `+1` the syntax carries: at the
 top of the range that increment wraps to zero, and a set claiming a list of no
 entries would read as conformant.
 
+### A weight is a shift count and a multiplier
+
+⛔ **`luma_log2_weight_denom` leaves this package as a SHIFT COUNT** — a
+`Weighting` computes `1 << LogDenom` and shifts a sample by it. A count the
+stream chose freely is a shift by whatever it likes, and in Go that is not a
+panic: it is a silently wrong number. Measured before the bound: a slice
+declaring **1 048 576** was read and handed on.
+
+⛔ **A weight multiplies a sample before anything clamps it.** One of 2³⁰
+overflows the arithmetic rather than making a bright picture; that too was read
+and handed on.
+
+7.4.3.2 puts both denominators in **0..7** and every weight and offset in
+**-128..127**, and `ParseSliceReferences` now refuses the rest. Both boundaries
+are pinned: -128 and 127 are read, 128 and -129 are not.
+
 ## How it is verified
 
 Every rule has a witness, and every witness was checked to **fail when its rule
