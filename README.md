@@ -73,6 +73,20 @@ The check is made on the value **before** the `+1` the syntax carries: at the
 top of the range that increment wraps to zero, and a set claiming a list of no
 entries would read as conformant.
 
+### A width is read before it is narrowed
+
+⛔ **`log2_max_frame_num_minus4` and `log2_max_pic_order_cnt_lsb_minus4` are BIT
+COUNTS** — the slice header reads `frame_num` and the order count with them, so
+a reader given a wrong one is misaligned from that field onwards. Each was kept
+in a byte with **no bound at all**, and so were both bit depths.
+
+A narrowing conversion does not merely lose a value: it maps out-of-range values
+**onto legal ones**. `uint8(1048576)` is 0, and `uint8(256) + 4` is 4 — the
+smallest width the format allows — so a check made afterwards would *pass* them.
+
+All four are now read as a full `uint32`, checked against 7.4.2.1.1's range, and
+narrowed afterwards. Both boundaries are pinned.
+
 ### A weight is a shift count and a multiplier
 
 ⛔ **`luma_log2_weight_denom` leaves this package as a SHIFT COUNT** — a
