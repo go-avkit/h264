@@ -177,6 +177,11 @@ func ApplyRefListOps(list, refs []RefPicture, ops []RefListOp, active int,
 	if active == 0 {
 		return nil, nil
 	}
+	// ⛔ Exported, so a caller may hand a count that came from neither a
+	// parameter set nor a slice header this package read.
+	if active > maxActiveRefs {
+		return nil, fmt.Errorf("%w: %d active references", ErrRefLists, active)
+	}
 	if len(list) == 0 {
 		return nil, fmt.Errorf("%w: no reference is held", ErrRefLists)
 	}

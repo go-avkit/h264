@@ -475,3 +475,18 @@ func TestAPictureDisplacedFromTheListIsStillAReference(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyRefListOpsBoundsTheCount(t *testing.T) {
+	// ⛔ Exported, so a caller may hand a count that came from neither a
+	// parameter set nor a slice header this package read. An entry is 24 bytes
+	// and the count is a 32-bit syntax element.
+	list := []RefPicture{{}}
+	if _, err := ApplyRefListOps(list, list, nil, maxActiveRefs+1, 0, 1<<16); !errors.Is(err, ErrRefLists) {
+		t.Errorf("err = %v, want ErrRefLists", err)
+	}
+	// The bound must not cut a list that is within it.
+	got, err := ApplyRefListOps(list, list, nil, maxActiveRefs, 0, 1<<16)
+	if err != nil || len(got) != maxActiveRefs {
+		t.Errorf("a list of exactly %d gave %d entries, err %v", maxActiveRefs, len(got), err)
+	}
+}

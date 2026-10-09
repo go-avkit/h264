@@ -19,6 +19,12 @@ var ErrUnsupportedPPS = errors.New("h264: picture parameter set was not consumed
 // reader cannot consume.
 var ErrSliceGroups = errors.New("h264: slice groups are not supported")
 
+// ErrRefIdxRange means a parameter set or a slice header states more active
+// references than a list may hold. 7.4.2.2 and 7.4.3 put
+// num_ref_idx_lX_active_minus1 in 0..31; a larger value is not a large stream,
+// it is a few bytes asking a reader to size a list from the stream's number.
+var ErrRefIdxRange = errors.New("h264: num_ref_idx_lX_active_minus1 out of range")
+
 // PPS is what a picture parameter set says about the slices that refer to it.
 //
 // CABAC is the field everything above this turns on: the residuals of a slice are
@@ -71,8 +77,18 @@ func ParsePPS(u Unit, sps SPS) (PPS, error) {
 		return p, fmt.Errorf("%w: %d groups", ErrSliceGroups, groups+1)
 	}
 
-	p.NumRefIdxL0 = r.ue() + 1
-	p.NumRefIdxL1 = r.ue() + 1
+	// ⛔ Read BEFORE the +1 the syntax carries: at the top of the range the
+	// increment wraps to zero, and a bound applied after it would pass the one
+	// value that most needs refusing.
+	//
+	// ⛔ Checked HERE, where the count is READ. The same bound lived only in
+	// readWeightList, which left every other consumer of the count -- the
+	// reference lists above all -- sizing an allocation from the stream.
+	l0, l1 := r.ue(), r.ue()
+	if r.err == nil && (l0 >= maxActiveRefs || l1 >= maxActiveRefs) {
+		return p, fmt.Errorf("%w: %d and %d", ErrRefIdxRange, l0, l1)
+	}
+	p.NumRefIdxL0, p.NumRefIdxL1 = l0+1, l1+1
 	p.WeightedPred = r.flag()
 	p.WeightedBipredIDC = uint8(r.bits(2))
 	p.InitQP = r.se() + 26
