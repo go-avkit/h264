@@ -19,10 +19,14 @@ type pset struct {
 	refIdxWideN  int
 	sliceGroups  uint32 // num_slice_groups_minus1
 	chromaOffset int32
-	tail         bool // state the optional trailing part
-	transform8x8 bool
-	scaling      bool
-	secondOffset int32
+	// initQPMinus26 and initQSMinus26 state the two quantisers, as the
+	// minus-26 the syntax carries.
+	initQPMinus26 int32
+	initQSMinus26 int32
+	tail          bool // state the optional trailing part
+	transform8x8  bool
+	scaling       bool
+	secondOffset  int32
 }
 
 // build writes p as a NAL unit, ending it the way a payload must end.
@@ -51,9 +55,9 @@ func (p pset) build() Unit {
 		w.ue(p.refIdxMinus1)
 	}
 	w.bit(0)
-	w.bits(0, 2) // weighted_bipred_idc
-	w.se(-1)     // pic_init_qp_minus26
-	w.se(0)      // pic_init_qs_minus26
+	w.bits(0, 2)          // weighted_bipred_idc
+	w.se(p.initQPMinus26) // pic_init_qp_minus26
+	w.se(p.initQSMinus26) // pic_init_qs_minus26
 	w.se(p.chromaOffset)
 	w.bit(1) // deblocking_filter_control_present_flag
 	w.bit(0)
@@ -93,7 +97,7 @@ func TestAMinimalSetDefaultsTheSecondChromaOffset(t *testing.T) {
 	// ⛔ A set that stops before the optional part leaves the second offset equal
 	// to the first, not zero. A decoder told zero would shift the chroma
 	// quantiser of every picture that refers to this set.
-	p, err := ParsePPS(pset{cabac: true, chromaOffset: -2}.build(), SPS{ChromaFormat: 1})
+	p, err := ParsePPS(pset{cabac: true, chromaOffset: -2, initQPMinus26: -1}.build(), SPS{ChromaFormat: 1})
 	if err != nil {
 		t.Fatalf("ParsePPS: %v", err)
 	}
@@ -326,6 +330,62 @@ func TestPPSRefusesAnOversizedRefIdx(t *testing.T) {
 			t.Errorf("minus1=%d: got %v, want it read", c.minus1, err)
 		case !c.refuse && pps.NumRefIdxL0 != c.minus1+1:
 			t.Errorf("minus1=%d: NumRefIdxL0=%d, want %d", c.minus1, pps.NumRefIdxL0, c.minus1+1)
+		}
+	}
+}
+
+// TestAQuantiserOutsideTheTables: both index the quantisation tables, and
+// every slice that refers to this set starts from InitQP. 7.4.2.2 puts the
+// picture quantiser in -QpBdOffsetY..51 and the switching one in 0..51.
+func TestAQuantiserOutsideTheTables(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		qp, qs int32
+		chroma int32
+		second int32
+		refuse bool
+	}{
+		{name: "the defaults"},
+		{name: "qp at the ceiling", qp: 25},
+		{name: "qp at the floor", qp: -26},
+		{name: "qp one past", qp: 26, refuse: true},
+		{name: "qp one below", qp: -27, refuse: true},
+		{name: "qp far past", qp: 1000, refuse: true},
+		{name: "qs at the ceiling", qs: 25},
+		{name: "qs one past", qs: 26, refuse: true},
+		{name: "qs one below", qs: -27, refuse: true},
+		{name: "chroma offset at the ceiling", chroma: 12},
+		{name: "chroma offset one past", chroma: 13, refuse: true},
+		{name: "chroma offset far below", chroma: -1000, refuse: true},
+	} {
+		p := pset{initQPMinus26: c.qp, initQSMinus26: c.qs, chromaOffset: c.chroma}
+		_, err := ParsePPS(p.build(), SPS{ChromaFormat: 1, BitDepthLuma: 8})
+		switch {
+		case c.refuse && !errors.Is(err, ErrUnsupportedPPS):
+			t.Errorf("%s: err = %v, want ErrUnsupportedPPS", c.name, err)
+		case !c.refuse && err != nil:
+			t.Errorf("%s was refused: %v", c.name, err)
+		}
+	}
+
+	// ⛔ The floor MOVES with the bit depth, so a ten-bit set may state -12.
+	p := pset{initQPMinus26: -38}
+	if _, err := ParsePPS(p.build(), SPS{ChromaFormat: 1, BitDepthLuma: 10}); err != nil {
+		t.Errorf("a ten-bit picture quantiser of -12 was refused: %v", err)
+	}
+	if _, err := ParsePPS(p.build(), SPS{ChromaFormat: 1, BitDepthLuma: 8}); !errors.Is(err, ErrUnsupportedPPS) {
+		t.Errorf("the same set at eight bits: err = %v, want ErrUnsupportedPPS", err)
+	}
+
+	// The second chroma offset is stated only in the optional tail.
+	for _, c := range []struct {
+		v      int32
+		refuse bool
+	}{{12, false}, {13, true}, {-13, true}} {
+		p := pset{tail: true, secondOffset: c.v}
+		_, err := ParsePPS(p.build(), SPS{ChromaFormat: 1, BitDepthLuma: 8})
+		if c.refuse != errors.Is(err, ErrUnsupportedPPS) {
+			t.Errorf("a second chroma offset of %d: err = %v", c.v, err)
 		}
 	}
 }

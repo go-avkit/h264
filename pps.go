@@ -93,7 +93,26 @@ func ParsePPS(u Unit, sps SPS) (PPS, error) {
 	p.WeightedBipredIDC = uint8(r.bits(2))
 	p.InitQP = r.se() + 26
 	p.InitQS = r.se() + 26
+	if r.err == nil {
+		// ⛔ Both index the quantisation tables, and every slice that refers to
+		// this set starts from InitQP. 7.4.2.2 puts the picture quantiser in
+		// -QpBdOffsetY..51 and the switching one in 0..51.
+		if lo := -qpBdOffset(sps.BitDepthLuma); p.InitQP < lo || p.InitQP > 51 {
+			return p, fmt.Errorf("%w: a picture quantiser of %d, outside %d..51",
+				ErrUnsupportedPPS, p.InitQP, lo)
+		}
+		if p.InitQS < 0 || p.InitQS > 51 {
+			return p, fmt.Errorf("%w: a switching quantiser of %d, outside 0..51",
+				ErrUnsupportedPPS, p.InitQS)
+		}
+	}
 	p.ChromaQPIndexOffset = r.se()
+	// ⛔ Added to a quantiser before it indexes the chroma tables. 7.4.2.2
+	// puts it in -12..12.
+	if r.err == nil && (p.ChromaQPIndexOffset < -12 || p.ChromaQPIndexOffset > 12) {
+		return p, fmt.Errorf("%w: a chroma quantiser offset of %d, outside -12..12",
+			ErrUnsupportedPPS, p.ChromaQPIndexOffset)
+	}
 	p.DeblockingControl = r.flag()
 	p.ConstrainedIntraPred = r.flag()
 	p.RedundantPicCnt = r.flag()
@@ -125,6 +144,10 @@ func ParsePPS(u Unit, sps SPS) (PPS, error) {
 			}
 		}
 		p.SecondChromaQPOffset = r.se()
+		if r.err == nil && (p.SecondChromaQPOffset < -12 || p.SecondChromaQPOffset > 12) {
+			return p, fmt.Errorf("%w: a second chroma quantiser offset of %d, outside -12..12",
+				ErrUnsupportedPPS, p.SecondChromaQPOffset)
+		}
 	}
 	if r.err != nil {
 		return p, r.err
