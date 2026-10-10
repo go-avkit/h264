@@ -73,6 +73,25 @@ The check is made on the value **before** the `+1` the syntax carries: at the
 top of the range that increment wraps to zero, and a set claiming a list of no
 entries would read as conformant.
 
+### A selector the consumer indexes with
+
+⛔ **`cabac_init_idc` picks one of THREE context tables and
+`disable_deblocking_filter_idc` one of three behaviours.** Neither was bounded,
+and a consumer indexes with them: a slice stating **1 048 576** was read and
+handed on. 7.4.3 puts both in 0..2.
+
+⛔ **`SliceQPY` indexes the quantisation tables, and it is a SUM** — the picture
+set's `InitQP` plus the slice's delta. Neither end was bounded, so a delta of
+1000 gave a quantiser of **1026**, twenty times the largest the tables hold.
+
+The floor **moves with the bit depth**: `QpBdOffsetY` is six per bit past eight,
+so a ten-bit sequence may legally state a quantiser down to −12. A bound written
+as zero refuses that stream, and there is a witness for it.
+
+Bounded with them, each because something later indexes a table with it: both
+deblocking offsets (−6..6), the picture and switching quantisers, and both
+chroma quantiser offsets (−12..12).
+
 ### A width is read before it is narrowed
 
 ⛔ **`log2_max_frame_num_minus4` and `log2_max_pic_order_cnt_lsb_minus4` are BIT

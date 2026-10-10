@@ -338,8 +338,21 @@ func parseSlice(u Unit, sps SPS, pps PPS, wantRefs bool) (SliceHeader, SliceRefe
 	// from, so reading it for an I slice takes the bits of the quantisation delta.
 	if pps.CABAC && h.Type != SliceI && h.Type != SliceSI {
 		ref.CABACInit = r.ue()
+		// ⛔ A SELECTOR, not a measurement: it picks one of three context
+		// tables, and a consumer indexes with it. 7.4.3 puts it in 0..2.
+		if r.err == nil && ref.CABACInit > 2 {
+			return h, ref, fmt.Errorf("%w: cabac_init_idc of %d", ErrSliceHeader, ref.CABACInit)
+		}
 	}
 	ref.QP = pps.InitQP + r.se()
+	if r.err == nil {
+		// 7.4.3: SliceQPY lies in -QpBdOffsetY..51, and it indexes the
+		// quantisation tables. QpBdOffsetY is 6 per bit of depth past eight.
+		if lo := -qpBdOffset(sps.BitDepthLuma); ref.QP < lo || ref.QP > 51 {
+			return h, ref, fmt.Errorf("%w: a slice quantiser of %d, outside %d..51",
+				ErrSliceHeader, ref.QP, lo)
+		}
+	}
 	if h.Type == SliceSP || h.Type == SliceSI {
 		if h.Type == SliceSP {
 			r.flag() // sp_for_switch_flag
@@ -348,9 +361,27 @@ func parseSlice(u Unit, sps SPS, pps PPS, wantRefs bool) (SliceHeader, SliceRefe
 	}
 	if pps.DeblockingControl {
 		ref.DeblockingIDC = r.ue()
+		// ⛔ Also a SELECTOR: 7.4.3 puts it in 0..2, and one means the filter
+		// is off, which is why the offsets below are not stated for it.
+		if r.err == nil && ref.DeblockingIDC > 2 {
+			return h, ref, fmt.Errorf("%w: disable_deblocking_filter_idc of %d",
+				ErrSliceHeader, ref.DeblockingIDC)
+		}
 		if ref.DeblockingIDC != 1 {
 			ref.AlphaC0OffsetDiv2 = r.se()
 			ref.BetaOffsetDiv2 = r.se()
+			if r.err == nil {
+				for _, o := range [2]struct {
+					name string
+					v    int32
+				}{{"alpha", ref.AlphaC0OffsetDiv2}, {"beta", ref.BetaOffsetDiv2}} {
+					// Each is doubled and added to a table index, 7.4.3.
+					if o.v < -6 || o.v > 6 {
+						return h, ref, fmt.Errorf("%w: a %s deblocking offset of %d",
+							ErrSliceHeader, o.name, o.v)
+					}
+				}
+			}
 		}
 	}
 	// What remains is slice_group_change_cycle, stated only when the picture set
@@ -554,3 +585,12 @@ func readMarking(r *sticky, h SliceHeader, ref *SliceReferences) {
 
 // BeginsPicture says whether this slice starts a new coded picture.
 func (h SliceHeader) BeginsPicture() bool { return h.FirstMB == 0 }
+
+// qpBdOffset is QpBdOffsetY, 7.4.2.1.1: six per bit of depth past eight. It is
+// how far below zero a quantiser may go.
+func qpBdOffset(depth uint8) int32 {
+	if depth < 8 {
+		return 0
+	}
+	return 6 * (int32(depth) - 8)
+}
