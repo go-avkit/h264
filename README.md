@@ -42,8 +42,12 @@ layers of one module. The decoder was **imported from
 [`oops1/go.264`](https://github.com/oops1/go.264) v1.12.0 (commit `3373a3f`)**,
 by Valery Chukalin, whose BSD 2-Clause licence is kept in `LICENSE-go.264`; the
 encoder and the hardware back ends of that project are not part of this import.
-Its own header parsers (`internal/syntax`) are still there, next to the ones in
-the root package, until the two are unified.
+Its own header parsers (`internal/syntax`) are gone: the decoder reads sequence and
+picture parameter sets and slice headers with the root package's (`ParseSPS`,
+`ParsePPS`, `ParseSliceReferences`, which gained the scaling lists, VUI, picture
+order cycle and `DataBit` for it), so there is one reader of that syntax and the
+root's range checks apply to what the decoder decodes. `internal/syntaxfixture`
+only writes sets and headers, for tests.
 
 **Verified** against ITU-T H.264.1: `TestJVTConformance` compares every picture of
 the 73 streams in `testdata/jvt` with ffmpeg's `framemd5`, bit for bit. 69

@@ -468,6 +468,20 @@ func TestASetThatCannotBeAPictureIsRefused(t *testing.T) {
 			t.Errorf("%s: %v, want ErrUnsupportedSPS", name, err)
 		}
 	}
+	badID := baseSet()
+	badID.id = 32
+	tooManyRefs := baseSet()
+	tooManyRefs.maxRefs = 17
+	for name, s := range map[string]set{"set id 32": badID, "17 reference frames": tooManyRefs} {
+		if _, err := ParseSPS(s.build()); !errors.Is(err, ErrUnsupportedSPS) {
+			t.Errorf("%s: %v, want ErrUnsupportedSPS", name, err)
+		}
+	}
+	atEdge := baseSet()
+	atEdge.id, atEdge.maxRefs = 31, 16
+	if _, err := ParseSPS(atEdge.build()); err != nil {
+		t.Errorf("set 31 with 16 references: %v", err)
+	}
 	edge := baseSet()
 	edge.mbWidth = 1024
 	if _, err := ParseSPS(edge.build()); err != nil {

@@ -80,6 +80,8 @@ type set struct {
 	// vui_parameters_present_flag when it is set.
 	constraint uint8
 	vui        func(w *spsWriter)
+	// id is seq_parameter_set_id, maxRefs max_num_ref_frames (1 when zero).
+	id, maxRefs uint32
 }
 
 // build writes s as a NAL unit, header byte and all.
@@ -88,7 +90,7 @@ func (s set) build() Unit {
 	w.bits(uint32(s.profile), 8)
 	w.bits(uint32(s.constraint), 8) // constraint flags and the two reserved bits
 	w.bits(uint32(s.level), 8)
-	w.ue(0) // seq_parameter_set_id
+	w.ue(s.id) // seq_parameter_set_id
 	if highProfiles[s.profile] {
 		w.ue(uint32(s.chroma))
 		if s.chroma == 3 {
@@ -132,7 +134,11 @@ func (s set) build() Unit {
 			w.se(1)
 		}
 	}
-	w.ue(1) // max_num_ref_frames
+	if s.maxRefs != 0 {
+		w.ue(s.maxRefs)
+	} else {
+		w.ue(1) // max_num_ref_frames
+	}
 	w.bit(0)
 	w.ue(s.mbWidth - 1)
 	w.ue(s.mapUnits - 1)

@@ -7,7 +7,7 @@ import (
 	"github.com/go-avkit/h264/internal/bits"
 	"github.com/go-avkit/h264/internal/frame"
 	"github.com/go-avkit/h264/internal/nal"
-	"github.com/go-avkit/h264/internal/syntax"
+	syntax "github.com/go-avkit/h264/internal/syntaxfixture"
 	"github.com/go-avkit/h264/internal/testutil"
 )
 
