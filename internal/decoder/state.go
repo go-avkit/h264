@@ -122,8 +122,9 @@ func (g *mbGrid) around(mbx, mby, sliceID int) neighbours {
 	}
 }
 
-func (g *mbGrid) motion() *frame.Motion {
-	mo := frame.NewMotion(g.widthMBs, g.heightMBs)
+// motion copies the grid's motion into mo, which must be freshly made or
+// Reset and have the grid's geometry.
+func (g *mbGrid) motion(mo *frame.Motion) *frame.Motion {
 	for mby := 0; mby < g.heightMBs; mby++ {
 		for mbx := 0; mbx < g.widthMBs; mbx++ {
 			m := g.at(mbx, mby)
