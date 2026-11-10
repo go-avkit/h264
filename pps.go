@@ -46,6 +46,11 @@ type PPS struct {
 	RedundantPicCnt      bool
 	Transform8x8         bool
 	SecondChromaQPOffset int32 // equals ChromaQPIndexOffset when not stated
+	// ScalingPresent is pic_scaling_matrix_present_flag and Scaling the lists it
+	// states; one that is not Present falls back by Table 7-2, which is the
+	// consumer's to apply (it depends on the sequence set's lists too).
+	ScalingPresent bool
+	Scaling        ScalingLists
 }
 
 // ParsePPS reads a picture parameter set.
@@ -126,22 +131,18 @@ func ParsePPS(u Unit, sps SPS) (PPS, error) {
 	// that read it anyway would take the trailing bits for fields.
 	if r.moreData() {
 		p.Transform8x8 = r.flag()
-		if r.flag() { // pic_scaling_matrix_present_flag
+		if p.ScalingPresent = r.flag(); p.ScalingPresent { // pic_scaling_matrix_present_flag
 			// Six lists of sixteen always, and the eights only when 8x8
 			// transforms are in use -- two of them, or six when the chroma
 			// planes are coded at full resolution.
-			for i := 0; i < 6; i++ {
-				skipScalingList(r, 16)
-			}
+			count := 6
 			if p.Transform8x8 {
-				eights := 2
+				count += 2
 				if sps.ChromaFormat == 3 {
-					eights = 6
-				}
-				for i := 0; i < eights; i++ {
-					skipScalingList(r, 64)
+					count += 4
 				}
 			}
+			p.Scaling = readScalingLists(r, count)
 		}
 		p.SecondChromaQPOffset = r.se()
 		if r.err == nil && (p.SecondChromaQPOffset < -12 || p.SecondChromaQPOffset > 12) {

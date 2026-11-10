@@ -5,6 +5,7 @@ package h264
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 )
 
@@ -75,13 +76,17 @@ type set struct {
 	pocLSBMinus4   uint32
 	bdLuma         uint32
 	bdChroma       uint32
+	// constraint is the byte after profile_idc, and vui writes what follows
+	// vui_parameters_present_flag when it is set.
+	constraint uint8
+	vui        func(w *spsWriter)
 }
 
 // build writes s as a NAL unit, header byte and all.
 func (s set) build() Unit {
 	w := &spsWriter{}
 	w.bits(uint32(s.profile), 8)
-	w.bits(0, 8) // constraint flags and the two reserved bits
+	w.bits(uint32(s.constraint), 8) // constraint flags and the two reserved bits
 	w.bits(uint32(s.level), 8)
 	w.ue(0) // seq_parameter_set_id
 	if highProfiles[s.profile] {
@@ -146,7 +151,12 @@ func (s set) build() Unit {
 	} else {
 		w.bit(0)
 	}
-	w.bit(0) // vui_parameters_present_flag
+	if s.vui != nil {
+		w.bit(1) // vui_parameters_present_flag
+		s.vui(w)
+	} else {
+		w.bit(0)
+	}
 	return Unit{Type: UnitSPS, Payload: w.data}
 }
 
@@ -386,7 +396,7 @@ func TestTheEscapingIsUndoneBeforeAnyFieldIsRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("escaped: %v", err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("escaped set read as %+v, want %+v", got, want)
 	}
 }
