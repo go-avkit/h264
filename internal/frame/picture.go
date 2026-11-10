@@ -133,4 +133,22 @@ func NewMotion(widthMBs, heightMBs int) *Motion {
 	return m
 }
 
+// Fits reports whether m has the geometry of a picture of the given size in
+// macroblocks, so a recycled Motion can stand in for NewMotion's.
+func (m *Motion) Fits(widthMBs, heightMBs int) bool {
+	return m.BlocksWide == widthMBs*4 && m.BlocksHigh == heightMBs*4
+}
+
+// Reset returns m to the state NewMotion leaves it in: no vectors, no
+// reference picture, reference index -1 (intra, or list not used).
+func (m *Motion) Reset() {
+	for l := 0; l < 2; l++ {
+		clear(m.Mv[l])
+		clear(m.RefPOC[l])
+		for i := range m.RefIdx[l] {
+			m.RefIdx[l][i] = -1
+		}
+	}
+}
+
 func (m *Motion) Index(bx, by int) int { return by*m.BlocksWide + bx }

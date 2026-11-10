@@ -26,6 +26,9 @@ type Decoder struct {
 	pending    []*frame.Picture
 	maxReorder int
 
+	motionOwners []*frame.Picture
+	motionFree   []*frame.Motion
+
 	scal    *scalingTables
 	scalSPS *syntax.SPS
 	scalPPS *syntax.PPS
@@ -111,6 +114,46 @@ func (d *Decoder) bump(drain bool) []*frame.Picture {
 	return out
 }
 
+// takeMotion returns a cleared Motion for the current geometry, recycled when
+// one is free: a Motion is 18 bytes per 4x4 block, 1.1 MB at 720p, and one
+// was allocated per picture.
+func (d *Decoder) takeMotion() *frame.Motion {
+	w, h := d.grid.widthMBs, d.grid.heightMBs
+	for len(d.motionFree) > 0 {
+		m := d.motionFree[len(d.motionFree)-1]
+		d.motionFree = d.motionFree[:len(d.motionFree)-1]
+		if m.Fits(w, h) {
+			m.Reset()
+			return m
+		}
+	}
+	return frame.NewMotion(w, h)
+}
+
+// recycleMotion takes back the Motion of every picture that has left the
+// reference set: nothing can name it as a co-located picture any more, and
+// the Frame handed to the caller does not expose it.
+func (d *Decoder) recycleMotion() {
+	keep := d.motionOwners[:0]
+	for _, p := range d.motionOwners {
+		held := false
+		for _, r := range d.buffer.refs {
+			if r.pic == p {
+				held = true
+				break
+			}
+		}
+		if held {
+			keep = append(keep, p)
+			continue
+		}
+		d.motionFree = append(d.motionFree, p.Motion)
+		p.Motion = nil
+	}
+	clear(d.motionOwners[len(keep):])
+	d.motionOwners = keep
+}
+
 func (d *Decoder) finishPicture() []*frame.Picture {
 	if d.cur == nil {
 		return nil
@@ -128,10 +171,16 @@ func (d *Decoder) finishPicture() []*frame.Picture {
 	}
 	pic.ExtendBorders()
 	if d.grid != nil {
-		pic.Motion = d.grid.motion()
+		// Only a reference picture can be a co-located picture (8.4.1.2.1
+		// draws it from RefPicList1[0]), so only it keeps its motion.
+		if d.lastHdr == nil || d.lastHdr.NalRefIDC != 0 {
+			pic.Motion = d.grid.motion(d.takeMotion())
+			d.motionOwners = append(d.motionOwners, pic)
+		}
 	}
 	if d.buffer != nil && d.lastHdr != nil {
 		d.buffer.store(pic, d.lastHdr)
+		d.recycleMotion()
 	}
 	d.pending = append(d.pending, pic)
 	return d.bump(false)
