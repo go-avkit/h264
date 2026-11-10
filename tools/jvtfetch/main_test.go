@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -44,14 +45,14 @@ func TestFetchUnpacksEachManifestEntryAndSkipsWhatIsThere(t *testing.T) {
 		"/A.zip": zipOf(t, map[string]string{"A.264": "bits", "../evil.txt": "x", "readme.txt": "r"}),
 		"/B.zip": zipOf(t, map[string]string{"B.jsv": "bits"}),
 	}
-	hits := 0
+	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, ok := archives[r.URL.Path]
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
-		hits++
+		hits.Add(1)
 		w.Write(body)
 	}))
 	defer srv.Close()
@@ -71,8 +72,8 @@ func TestFetchUnpacksEachManifestEntryAndSkipsWhatIsThere(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "..", "evil.txt")); err == nil {
 		t.Fatal("an entry left the directory")
 	}
-	if _, err := run(t, "--dir", dir, "--manifests", manifests, "--url", srv.URL+"/"); err != nil || hits != 2 {
-		t.Fatalf("second run: %v, %d downloads, want 2 in all", err, hits)
+	if _, err := run(t, "--dir", dir, "--manifests", manifests, "--url", srv.URL+"/"); err != nil || hits.Load() != 2 {
+		t.Fatalf("second run: %v, %d downloads, want 2 in all", err, hits.Load())
 	}
 }
 

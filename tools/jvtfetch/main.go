@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -26,6 +27,7 @@ import (
 const defaultURL = "https://www.itu.int/wftp3/av-arch/jvt-site/draft_conformance/AVCv1/"
 
 const (
+	workers    = 8
 	maxZip     = 300 << 20
 	maxExtract = 1 << 30
 )
@@ -56,14 +58,32 @@ func RootCmd() *cobra.Command {
 			if len(files) == 0 {
 				return fmt.Errorf("no manifests in %s", manifests)
 			}
+			// The archives are 1 to 60 MB each and the server is slow per
+			// connection, so they are fetched several at a time.
+			var (
+				wg   sync.WaitGroup
+				mu   sync.Mutex
+				errs []error
+				sem  = make(chan struct{}, workers)
+			)
 			for _, f := range files {
 				name := strings.TrimSuffix(filepath.Base(f), ".md5")
-				if err := fetch(base, dir, name); err != nil {
-					return fmt.Errorf("%s: %w", name, err)
-				}
-				fmt.Fprintln(cmd.OutOrStdout(), "fetched", name)
+				wg.Add(1)
+				sem <- struct{}{}
+				go func() {
+					defer func() { <-sem; wg.Done() }()
+					err := fetch(base, dir, name)
+					mu.Lock()
+					defer mu.Unlock()
+					if err != nil {
+						errs = append(errs, fmt.Errorf("%s: %w", name, err))
+						return
+					}
+					fmt.Fprintln(cmd.OutOrStdout(), "fetched", name)
+				}()
 			}
-			return nil
+			wg.Wait()
+			return errors.Join(errs...)
 		},
 	}
 	cmd.Flags().StringVar(&dir, "dir", "", "directory to unpack into")

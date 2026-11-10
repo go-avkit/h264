@@ -48,6 +48,9 @@ jobs:
       # by its tests, the conformance vectors and the fuzzers below instead.
       - name: Test the decoder
         run: go test -race ./decoder/... ./internal/...
+      - name: Test the tools module
+        working-directory: tools
+        run: go vet ./... && go test -race ./...
       - name: Test + 100% coverage gate
         shell: bash
         run: |
