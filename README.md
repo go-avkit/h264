@@ -40,7 +40,7 @@ Its own header parsers (`internal/syntax`) are still there, next to the ones in
 the root package, until the two are unified.
 
 **Verified** against ITU-T H.264.1: `TestJVTConformance` compares every picture of
-the 73 streams in `testdata/jvt` with ffmpeg's `framemd5`, bit for bit. 67
+the 73 streams in `testdata/jvt` with ffmpeg's `framemd5`, bit for bit. 69
 match; `MR2_TANDBERG_E`, `MR3_TANDBERG_B`, `MR4_TANDBERG_C` and `MR5_TANDBERG_C`
 need MMCO 5 and frame-number gaps, which go.264 v1.12.0 does not handle
 ([oops1/go.264#2](https://github.com/oops1/go.264/pull/2)), and the test fails

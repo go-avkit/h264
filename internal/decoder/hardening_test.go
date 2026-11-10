@@ -183,18 +183,34 @@ func TestLongTermMarkingCannotGrowTheReferenceListForever(t *testing.T) {
 	}
 }
 
-func TestStartCodeStormStaysLinear(t *testing.T) {
-	const n = 1 << 20
+// decodeStorm times the decoder over n bytes of start codes, best of three.
+func decodeStorm(n int) time.Duration {
 	stream := make([]byte, 0, n)
 	for len(stream) < n {
 		stream = append(stream, 0x00, 0x00, 0x01, 0x0C)
 	}
-	start := time.Now()
-	d := New()
-	_, _ = d.Decode(stream)
-	_, _ = d.Flush()
-	if took := time.Since(start); took > 500*time.Millisecond {
-		t.Fatalf("scanning %d bytes of start codes took %v; a quadratic scanner is back", n, took)
+	var best time.Duration
+	for range 3 {
+		start := time.Now()
+		d := New()
+		_, _ = d.Decode(stream)
+		_, _ = d.Flush()
+		if took := time.Since(start); best == 0 || took < best {
+			best = took
+		}
+	}
+	return best
+}
+
+// Linear is judged by the ratio of two sizes, not by a wall-clock bound, so a
+// slow or emulated machine does not fail it; a quadratic scanner costs about
+// sixteen times for four times the input.
+func TestStartCodeStormStaysLinear(t *testing.T) {
+	const n = 1 << 18
+	small, large := decodeStorm(n), decodeStorm(4*n)
+	if large > 8*small+10*time.Millisecond {
+		t.Fatalf("%d bytes of start codes took %v and %d bytes %v; a quadratic scanner is back",
+			n, small, 4*n, large)
 	}
 }
 

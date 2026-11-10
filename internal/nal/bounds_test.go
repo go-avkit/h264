@@ -6,26 +6,43 @@ import (
 	"time"
 )
 
-func TestScannerCostIsLinearInTheInput(t *testing.T) {
-	const n = 1 << 21
+// scanStorm times the scanner over n bytes of back-to-back start codes, best
+// of three.
+func scanStorm(n int) (best time.Duration, units int) {
 	data := make([]byte, 0, n)
 	for len(data) < n {
 		data = append(data, 0x00, 0x00, 0x01, 0x0C)
 	}
-	start := time.Now()
-	s := NewScanner()
-	s.Append(data)
-	count := 0
-	for {
-		if _, ok := s.Next(); !ok {
-			break
+	for range 3 {
+		start := time.Now()
+		s := NewScanner()
+		s.Append(data)
+		units = 0
+		for {
+			if _, ok := s.Next(); !ok {
+				break
+			}
+			units++
 		}
-		count++
+		s.Flush()
+		if took := time.Since(start); best == 0 || took < best {
+			best = took
+		}
 	}
-	s.Flush()
-	if took := time.Since(start); took > time.Second {
-		t.Fatalf("scanning %d bytes into %d units took %v; the scanner is compacting once per unit again",
-			n, count, took)
+	return best, units
+}
+
+// Linear means four times the input costs about four times the time. It is
+// judged by that ratio, not by a wall-clock bound, so that a slow or emulated
+// machine does not fail it; a scanner that compacts once per unit costs about
+// sixteen times.
+func TestScannerCostIsLinearInTheInput(t *testing.T) {
+	const n = 1 << 19
+	small, _ := scanStorm(n)
+	large, units := scanStorm(4 * n)
+	if large > 8*small+10*time.Millisecond {
+		t.Fatalf("scanning %d bytes took %v and %d bytes into %d units %v; the scanner is compacting once per unit again",
+			n, small, 4*n, units, large)
 	}
 }
 

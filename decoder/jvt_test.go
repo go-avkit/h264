@@ -30,6 +30,27 @@ func frameSums(frames []*Frame) []string {
 	return out
 }
 
+// bitstreamIn returns the largest file of dir with a bitstream extension, which
+// is the stream: the archives also hold a readme and the reference YUV, and a
+// few name their stream differently from the archive (cabac_mot_frm0_full.zip
+// holds camp_mot_frm0_full.26l). It returns "" when there is none.
+func bitstreamIn(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	best, size := "", int64(-1)
+	for _, e := range entries {
+		switch strings.ToLower(filepath.Ext(e.Name())) {
+		case ".264", ".jsv", ".jvt", ".avc", ".26l", ".h264", ".bit", ".bits":
+			if info, err := e.Info(); err == nil && info.Size() > size {
+				best, size = filepath.Join(dir, e.Name()), info.Size()
+			}
+		}
+	}
+	return best
+}
+
 func manifest(t *testing.T, path string) []string {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -66,13 +87,7 @@ func TestJVTConformance(t *testing.T) {
 	for _, m := range manifests {
 		name := strings.TrimSuffix(filepath.Base(m), ".md5")
 		t.Run(name, func(t *testing.T) {
-			var stream string
-			for _, ext := range []string{".264", ".jsv", ".jvt", ".avc", ".26l", ".h264", ".bit", ".bits"} {
-				if _, err := os.Stat(filepath.Join(dir, name, name+ext)); err == nil {
-					stream = filepath.Join(dir, name, name+ext)
-					break
-				}
-			}
+			stream := bitstreamIn(filepath.Join(dir, name))
 			if stream == "" {
 				if os.Getenv("H264_JVT_REQUIRE") == "1" {
 					t.Fatalf("%s is not in %s", name, dir)
