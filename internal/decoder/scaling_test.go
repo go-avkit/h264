@@ -4,7 +4,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/go-avkit/h264/internal/syntax"
+	syntax "github.com/go-avkit/h264/internal/syntaxfixture"
 	"github.com/go-avkit/h264/internal/transform"
 )
 

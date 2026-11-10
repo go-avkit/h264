@@ -2,7 +2,7 @@ package decoder
 
 import (
 	h264 "github.com/go-avkit/h264"
-	"github.com/go-avkit/h264/internal/syntax"
+	syntax "github.com/go-avkit/h264/internal/syntaxfixture"
 )
 
 // The stream-building tests describe their parameter sets with the fixture types

@@ -3,11 +3,7 @@
 
 package h264
 
-import (
-	"testing"
-
-	"github.com/go-avkit/h264/internal/syntax"
-)
+import "testing"
 
 // Below 30 the table is the identity and above it flattens (Table 8-15); the sum
 // is clipped at both ends, so an offset cannot index outside it.
@@ -18,14 +14,6 @@ func TestChromaQPFollowsTable815(t *testing.T) {
 	} {
 		if got := ChromaQP(c.qp, c.off); got != c.want {
 			t.Errorf("ChromaQP(%d, %d) = %d, want %d", c.qp, c.off, got, c.want)
-		}
-	}
-	// The same function as the decoder's own, over its whole domain.
-	for qp := -20; qp < 80; qp++ {
-		for off := -12; off <= 12; off++ {
-			if ChromaQP(qp, off) != syntax.ChromaQP(qp, off) {
-				t.Fatalf("ChromaQP(%d, %d) differs from the decoder's", qp, off)
-			}
 		}
 	}
 }

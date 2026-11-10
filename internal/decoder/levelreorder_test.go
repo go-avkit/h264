@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	h264 "github.com/go-avkit/h264"
 	"github.com/go-avkit/h264/internal/nal"
-	"github.com/go-avkit/h264/internal/syntax"
 )
 
 const (
@@ -39,25 +39,23 @@ func pyramidStream(t *testing.T) []byte {
 	return data
 }
 
-func withLevel(t *testing.T, stream []byte, levelIDC uint8) ([]byte, *syntax.SPS) {
+func withLevel(t *testing.T, stream []byte, levelIDC uint8) ([]byte, *h264.SPS) {
 	t.Helper()
 	var out []byte
-	var last *syntax.SPS
+	var last *h264.SPS
 	for _, ebsp := range nal.SplitAnnexB(stream) {
 		u, err := nal.Parse(ebsp)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if u.Header.Type == nal.TypeSPS {
-			sps, err := syntax.ParseSPS(u.RBSP)
+			// level_idc is the third byte of the set; the rest is left as it is.
+			u.RBSP[2] = levelIDC
+			sps, err := h264.ParseSPS(h264.Unit{Type: h264.UnitSPS, Payload: nal.Escape(nil, u.RBSP)})
 			if err != nil {
 				t.Fatal(err)
 			}
-			sps.LevelIDC = levelIDC
-			if u.RBSP, err = syntax.WriteSPS(sps); err != nil {
-				t.Fatal(err)
-			}
-			last = sps
+			last = &sps
 		}
 		out = nal.AppendAnnexB(out, u, true)
 	}

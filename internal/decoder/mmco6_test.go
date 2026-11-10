@@ -9,7 +9,7 @@ import (
 	"github.com/go-avkit/h264/internal/bits"
 	"github.com/go-avkit/h264/internal/decoder"
 	"github.com/go-avkit/h264/internal/nal"
-	"github.com/go-avkit/h264/internal/syntax"
+	syntax "github.com/go-avkit/h264/internal/syntaxfixture"
 )
 
 const (
