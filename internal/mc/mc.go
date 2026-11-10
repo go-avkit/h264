@@ -135,19 +135,34 @@ func Average(dst []byte, dstStride, dstOff int, a []byte, aStride, aOff int, b [
 	simd.AvgBytes(dst, dstStride, dstOff, a, aStride, aOff, b, bStride, bOff, w, h)
 }
 
+// WeightUni applies the explicit single-list weighting of 8.4.2.3.2, equation
+// 8-449 (logWD >= 1) or 8-450 (logWD 0), in place.
+//
+// A weight of 2^logWD with offset 0 -- what a slice states for a reference
+// whose luma_weight_flag or chroma_weight_flag is 0 (7.4.3.2) -- maps every
+// sample to itself, (s*2^k + 2^(k-1)) >> k = s, and is skipped. FFmpeg's
+// ff_h264_pred_weight_table (libavcodec/h264_parse.c) sets use_weight only
+// when some entry carries a flag, so a slice of default entries is not
+// weighted at all there.
 func WeightUni(dst []byte, stride, off, w, h, weight, offset, logWD int) {
-	round := 0
+	if offset == 0 && weight == 1<<uint(logWD) {
+		return
+	}
 	if logWD >= 1 {
-		round = 1 << uint(logWD-1)
+		round := 1 << uint(logWD-1)
+		sh := uint(logWD)
+		for y := 0; y < h; y++ {
+			row := dst[off+y*stride : off+y*stride+w]
+			for x, s := range row {
+				row[x] = byte(clip1((int(s)*weight+round)>>sh + offset))
+			}
+		}
+		return
 	}
 	for y := 0; y < h; y++ {
-		row := off + y*stride
-		for x := 0; x < w; x++ {
-			v := int(dst[row+x]) * weight
-			if logWD >= 1 {
-				v = (v + round) >> uint(logWD)
-			}
-			dst[row+x] = byte(clip1(v + offset))
+		row := dst[off+y*stride : off+y*stride+w]
+		for x, s := range row {
+			row[x] = byte(clip1(int(s)*weight + offset))
 		}
 	}
 }
