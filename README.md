@@ -53,12 +53,24 @@ pictures after it (what a poster frame at 1.5 s into a GOP costs), Apple M4 Max:
 
 | | time |
 |---|---|
-| this decoder, as imported | 249 to 259 ms |
+| go.264 v1.12.0, as imported | 249 to 259 ms, 127 MB and 1975 allocations |
+| this decoder with the two changes below | about 205 ms, 82 MB and 1685 allocations |
 | `ffmpeg -threads 1 -ss 5.5 -i clip -frames:v 1` (process start and exit included, about 30 ms) | 88 ms |
 
-It is slower than ffmpeg, which is an open defect
-([go-avkit/decode#10](https://github.com/go-avkit/decode/issues/10)); the
-profile is in the issue and the work follows.
+Medians of 9 interleaved rounds, `GOMAXPROCS=1`, 1-minute load 5 to 7, measured
+on the go.264 tree before the import (the code is the same); the benchmark is
+`BenchmarkDecodeMidGOP` (`H264_MIDGOP_CLIP=<file>`, the ffmpeg command that makes
+the clip is in its comment). The rows after the first are the changes of #36
+(an explicit weight that is the default is not applied: 13 % of the profile, 259
+to 208 ms) and #37 (the motion field of a picture that is no longer a reference
+is reused: 127 to 82 MB, about 4 % of the time).
+
+It is still about 3.7 times slower than ffmpeg on decode alone, which is an open
+defect ([go-avkit/decode#10](https://github.com/go-avkit/decode/issues/10)). Where
+the time goes now: CABAC residual decoding about 20 %, deblocking about 21 %,
+fresh picture planes about 10 % (the `Frame` a caller holds aliases them, so they
+are not reused), and no NEON kernels on arm64. A one-step CABAC renormalisation
+was measured and gave nothing, so it is not in.
 
 ## What the root package is not
 
