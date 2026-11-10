@@ -131,12 +131,47 @@ func (c *edgeContext) filterMB(mbx, mby int) {
 	if cur.Transform8x8 {
 		step = 2
 	}
-	for e := 0; e < 4; e += step {
+	// last is one past the last edge to visit. A macroblock without a coded
+	// coefficient whose sixteen blocks share one motion has boundary strength 0
+	// on every internal edge (8.7.2.1: no intra, no coefficients, same
+	// reference pictures and vectors), so only its left and top edges can
+	// filter. P_Skip and 16x16 partitions with no residual are most of a
+	// P picture, and each of them used to compute twenty-four strengths to
+	// find that out.
+	last := 4
+	if cur.internalEdgesUnfiltered() {
+		last = 1
+	}
+	for e := 0; e < last; e += step {
 		c.verticalEdge(cur, left, mbx, mby, e)
 	}
-	for e := 0; e < 4; e += step {
+	for e := 0; e < last; e += step {
 		c.horizontalEdge(cur, top, mbx, mby, e)
 	}
+}
+
+// internalEdgesUnfiltered reports whether every edge inside the macroblock has
+// boundary strength 0: it is not intra, none of its blocks has a coefficient,
+// and all sixteen carry the same prediction (the same reference pictures and
+// vectors in both lists, which is what motionDiffers compares).
+func (m *MB) internalEdgesUnfiltered() bool {
+	if m.Intra || m.IPCM {
+		return false
+	}
+	for _, nz := range m.NzY {
+		if nz != 0 {
+			return false
+		}
+	}
+	for b := 1; b < 16; b++ {
+		if m.RefPicL0[b] != m.RefPicL0[0] || m.MvL0[b] != m.MvL0[0] {
+			return false
+		}
+		if m.Bipredictive && (m.RefPicL1[b] != m.RefPicL1[0] || m.MvL1[b] != m.MvL1[0]) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int) {
