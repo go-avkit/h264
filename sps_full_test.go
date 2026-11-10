@@ -360,3 +360,90 @@ func TestAPictureSetStatesItsScalingLists(t *testing.T) {
 		t.Errorf("8x8 list 1: %v", l.List8x8[1][:3])
 	}
 }
+
+func filled4(v uint8) (l [16]uint8) {
+	for i := range l {
+		l[i] = v
+	}
+	return l
+}
+
+func filled8(v uint8) (l [64]uint8) {
+	for i := range l {
+		l[i] = v
+	}
+	return l
+}
+
+// TestResolvedScalingFollowsTable72: a stated list is itself, a stated "default"
+// is the default of its kind, an omitted list falls back (the first of each kind to
+// the fall-back lists, the others to the list before), and a set that states no
+// matrix is flat.
+func TestResolvedScalingFollowsTable72(t *testing.T) {
+	flat4, flat8 := filled4(16), filled8(16)
+	l4, l8 := SPS{Profile: 66}.ResolvedScaling()
+	if l4[0] != flat4 || l8[5] != flat8 {
+		t.Error("a baseline set is not flat")
+	}
+	l4, l8 = SPS{Profile: 100}.ResolvedScaling()
+	if l4[3] != flat4 || l8[0] != flat8 {
+		t.Error("a high profile set without a matrix is not flat")
+	}
+
+	sps := SPS{Profile: 100, ChromaFormat: 1, ScalingPresent: true}
+	sps.Scaling.Present4x4[1], sps.Scaling.UseDefault4x4[1] = true, true // intra Cb: default
+	sps.Scaling.Present4x4[3], sps.Scaling.UseDefault4x4[3] = true, true // inter Y: default
+	sps.Scaling.Present4x4[2], sps.Scaling.List4x4[2] = true, filled4(7)
+	sps.Scaling.Present8x8[1], sps.Scaling.UseDefault8x8[1] = true, true // inter Y 8x8: default
+	sps.Scaling.Present8x8[0], sps.Scaling.List8x8[0] = true, filled8(9)
+	l4, l8 = sps.ResolvedScaling()
+	if l4[0] != defaultScan4x4Intra || l4[1] != defaultScan4x4Intra || l4[2] != filled4(7) ||
+		l4[3] != defaultScan4x4Inter || l4[4] != defaultScan4x4Inter || l4[5] != defaultScan4x4Inter {
+		t.Errorf("4x4 lists %v", l4)
+	}
+	if l8[0] != filled8(9) || l8[1] != defaultScan8x8Inter || l8[2] != flat8 {
+		t.Errorf("8x8 lists: only two exist at 4:2:0, the rest are flat")
+	}
+	s := SPS{Profile: 244, ChromaFormat: 3, ScalingPresent: true}
+	s.Scaling.Present8x8[0], s.Scaling.List8x8[0] = true, filled8(5)
+	s.Scaling.Present8x8[3], s.Scaling.UseDefault8x8[3] = true, true // inter Cb at 4:4:4
+	_, l8 = s.ResolvedScaling()
+	if l8[2] != filled8(5) || l8[4] != filled8(5) || l8[1] != defaultScan8x8Inter || l8[3] != defaultScan8x8Inter || l8[5] != defaultScan8x8Inter {
+		t.Errorf("4:4:4 lists chain two back")
+	}
+
+	// A picture set that states nothing takes the sequence's lists, or is flat.
+	l4, l8 = PPS{}.ResolvedScaling(sps)
+	w4, w8 := sps.ResolvedScaling()
+	if l4 != w4 || l8 != w8 {
+		t.Error("a picture set without a matrix did not inherit the sequence lists")
+	}
+	if l4, _ = (PPS{}).ResolvedScaling(SPS{Profile: 100}); l4[0] != flat4 {
+		t.Error("no matrix anywhere is not flat")
+	}
+	// Fall-back rule A (no sequence matrix): the defaults; rule B: the sequence's.
+	p := PPS{ScalingPresent: true, Transform8x8: true}
+	p.Scaling.Present4x4[1], p.Scaling.UseDefault4x4[1] = true, true
+	l4, l8 = p.ResolvedScaling(SPS{Profile: 100, ChromaFormat: 1})
+	if l4[0] != defaultScan4x4Intra || l4[3] != defaultScan4x4Inter || l4[1] != defaultScan4x4Intra || l8[0] != defaultScan8x8Intra || l8[1] != defaultScan8x8Inter {
+		t.Error("rule A did not fall back to the defaults")
+	}
+	l4, l8 = p.ResolvedScaling(sps)
+	if l4[0] != defaultScan4x4Intra || l4[3] != w4[3] || l8[0] != w8[0] || l8[1] != w8[1] {
+		t.Error("rule B did not fall back to the sequence lists")
+	}
+	// Without 8x8 transforms a picture set has no 8x8 lists at all.
+	q := PPS{ScalingPresent: true}
+	if _, l8 = q.ResolvedScaling(sps); l8[0] != flat8 {
+		t.Error("8x8 lists without the 8x8 transform")
+	}
+	// A picture set's own 8x8 lists, at 4:4:4 six of them.
+	r := PPS{ScalingPresent: true, Transform8x8: true}
+	r.Scaling.Present8x8[1], r.Scaling.List8x8[1] = true, filled8(3)
+	r.Scaling.Present8x8[2], r.Scaling.UseDefault8x8[2] = true, true
+	r.Scaling.Present8x8[4], r.Scaling.List8x8[4] = true, filled8(4)
+	_, l8 = r.ResolvedScaling(SPS{Profile: 244, ChromaFormat: 3})
+	if l8[1] != filled8(3) || l8[2] != defaultScan8x8Intra || l8[3] != filled8(3) || l8[4] != filled8(4) || l8[5] != filled8(3) {
+		t.Errorf("picture set 8x8 lists at 4:4:4")
+	}
+}

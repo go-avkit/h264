@@ -301,3 +301,50 @@ func TestSliceTypeNames(t *testing.T) {
 		}
 	}
 }
+
+func TestSlicePPSIDIsTheThirdField(t *testing.T) {
+	w := &spsWriter{}
+	w.ue(0)
+	w.ue(2)
+	w.ue(9)
+	id, err := SlicePPSID(Unit{Type: UnitNonIDR, Payload: w.data})
+	if err != nil || id != 9 {
+		t.Fatalf("id %d, %v", id, err)
+	}
+	if _, err := SlicePPSID(Unit{Type: UnitSEI}); !errors.Is(err, ErrNotSlice) {
+		t.Errorf("not a slice: %v", err)
+	}
+	if _, err := SlicePPSID(Unit{Type: UnitIDR, Payload: nil}); err == nil {
+		t.Error("an empty slice has a picture set id")
+	}
+}
+
+func TestAnIDRSliceIsIntraAndItsIdentifierIsBounded(t *testing.T) {
+	sps, pps := plain()
+	if _, err := ParseSliceHeader(slice{typ: 0, idr: true}.build(sps, pps), sps, pps); !errors.Is(err, ErrSliceHeader) {
+		t.Errorf("a P slice in an IDR picture: %v", err)
+	}
+	// idr_pic_id of 65536, written by hand because the fixture states 7.
+	w := &spsWriter{}
+	w.ue(0)
+	w.ue(2)
+	w.ue(0)
+	w.bits(0, int(sps.Log2MaxFrameNum))
+	w.ue(65536)
+	w.bits(0xAB, 8)
+	if _, err := ParseSliceHeader(Unit{Type: UnitIDR, Payload: w.data}, sps, pps); !errors.Is(err, ErrSliceHeader) {
+		t.Errorf("idr_pic_id 65536: %v", err)
+	}
+}
+
+func TestTheSliceDataBeginsWhereTheHeaderEnds(t *testing.T) {
+	sps, pps := refSets()
+	u := refSlice{typ: 2, refIDC: 3, idr: true, qpDelta: -3}.build(sps, pps)
+	_, ref, err := ParseSliceReferences(u, sps, pps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.DataBit <= 0 || ref.DataBit > len(u.Unescape())*8 {
+		t.Errorf("DataBit %d of %d bits", ref.DataBit, len(u.Unescape())*8)
+	}
+}

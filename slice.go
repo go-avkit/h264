@@ -104,6 +104,7 @@ type SliceHeader struct {
 	FieldPic        bool
 	BottomField     bool
 	IDR             bool
+	RefIDC          uint8 // nal_ref_idc of the unit: 0 means no picture refers to this one
 	IDRPicID        uint32
 	POCLSB          uint32
 	DeltaPOCBottom  int32
@@ -175,6 +176,26 @@ type SliceReferences struct {
 	DeblockingIDC     uint32
 	AlphaC0OffsetDiv2 int32
 	BetaOffsetDiv2    int32
+
+	// DataBit is where slice_data() begins: a bit offset into Unit.Unescape(),
+	// which is what a decoder that goes on to read the macroblocks seeks to. For a
+	// CABAC slice the alignment bits that precede the data are still ahead of it.
+	DataBit int
+}
+
+// SlicePPSID reads the picture parameter set a slice refers to, which is the third
+// field of its header and the one that decides how the rest is read: the widths of
+// what follows depend on the sequence set that set names. A caller holding the
+// sets by id asks this first, then hands the right pair to ParseSliceReferences.
+func SlicePPSID(u Unit) (uint32, error) {
+	if u.Type != UnitIDR && u.Type != UnitNonIDR {
+		return 0, fmt.Errorf("%w: type %d", ErrNotSlice, u.Type)
+	}
+	r := newSticky(u.Unescape())
+	r.ue() // first_mb_in_slice
+	r.ue() // slice_type
+	id := r.ue()
+	return id, r.err
 }
 
 // ParseSliceReferences reads a slice header whole: everything ParseSliceHeader
@@ -231,6 +252,12 @@ func parseSlice(u Unit, sps SPS, pps PPS, wantRefs bool) (SliceHeader, SliceRefe
 		return h, ref, fmt.Errorf("%w: slice type %d", ErrSliceHeader, t)
 	}
 	h.Type = SliceType(t)
+	h.RefIDC = u.RefIDC
+	// ⛔ 7.4.3: in an IDR picture every slice is I or SI. A P slice there asks for
+	// references that an IDR has just emptied.
+	if h.IDR && h.Type != SliceI && h.Type != SliceSI {
+		return h, ref, fmt.Errorf("%w: a %s slice in an IDR picture", ErrSliceHeader, h.Type)
+	}
 	h.PPSID = r.ue()
 
 	if sps.SeparatePlanes {
@@ -246,6 +273,10 @@ func parseSlice(u Unit, sps SPS, pps PPS, wantRefs bool) (SliceHeader, SliceRefe
 	}
 	if h.IDR {
 		h.IDRPicID = r.ue()
+		// 7.4.3: idr_pic_id is in 0..65535.
+		if r.err == nil && h.IDRPicID > 65535 {
+			return h, ref, fmt.Errorf("%w: idr_pic_id of %d", ErrSliceHeader, h.IDRPicID)
+		}
 	}
 
 	// The picture order count is stated in one of three shapes, and the third
@@ -392,6 +423,7 @@ func parseSlice(u Unit, sps SPS, pps PPS, wantRefs bool) (SliceHeader, SliceRefe
 	if r.err != nil {
 		return h, ref, r.err
 	}
+	ref.DataBit = r.r.Pos()
 	return h, ref, nil
 }
 
