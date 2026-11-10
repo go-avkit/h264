@@ -59,24 +59,23 @@ pictures after it (what a poster frame at 1.5 s into a GOP costs), Apple M4 Max:
 
 | | time |
 |---|---|
-| go.264 v1.12.0, as imported | 249 to 259 ms, 127 MB and 1975 allocations |
-| this decoder with the two changes below | about 205 ms, 82 MB and 1685 allocations |
+| go.264 v1.12.0, as imported | 257 ms, 127 MB and 1975 allocations |
+| + explicit default weights skipped (#36), motion fields reused (#37) | 208 ms, 82 MB and 1684 allocations |
+| + internal edges of empty macroblocks skipped (#39), planes reused (#40) | 179 ms, 16 MB and 1525 allocations |
 | `ffmpeg -threads 1 -ss 5.5 -i clip -frames:v 1` (process start and exit included, about 30 ms) | 88 ms |
 
-Medians of 9 interleaved rounds, `GOMAXPROCS=1`, 1-minute load 5 to 7, measured
-on the go.264 tree before the import (the code is the same); the benchmark is
-`BenchmarkDecodeMidGOP` (`H264_MIDGOP_CLIP=<file>`, the ffmpeg command that makes
-the clip is in its comment). The rows after the first are the changes of #36
-(an explicit weight that is the default is not applied: 13 % of the profile, 259
-to 208 ms) and #37 (the motion field of a picture that is no longer a reference
-is reused: 127 to 82 MB, about 4 % of the time).
+Medians of 7 interleaved rounds, `GOMAXPROCS=1`, Apple M4 Max, 1-minute load 7.8 to
+8.1 (the limit is 8: allocations are exact, times are close), 1280x720 x264 GOP
+60, the IDR and the 45 pictures after it. The benchmark is `BenchmarkDecodeMidGOP`
+(`H264_MIDGOP_CLIP=<file>`, the ffmpeg command that makes the clip is in its
+comment).
 
-It is still about 3.7 times slower than ffmpeg on decode alone, which is an open
-defect ([go-avkit/decode#10](https://github.com/go-avkit/decode/issues/10)). Where
-the time goes now: CABAC residual decoding about 20 %, deblocking about 21 %,
-fresh picture planes about 10 % (the `Frame` a caller holds aliases them, so they
-are not reused), and no NEON kernels on arm64. A one-step CABAC renormalisation
-was measured and gave nothing, so it is not in.
+It is still about 3 times slower than ffmpeg on decode alone (179 ms against
+about 58 ms, once ffmpeg's process start is taken off), which is an open defect
+([go-avkit/decode#10](https://github.com/go-avkit/decode/issues/10)). Where the
+time goes now: CABAC residual decoding (the `DecodeDecision` engine itself; a
+one-step renormalisation was measured and gave nothing), the remaining deblocking,
+and no NEON kernels on arm64.
 
 ## What the root package is not
 
