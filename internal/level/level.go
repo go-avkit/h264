@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/go-avkit/h264/internal/syntax"
+	h264 "github.com/go-avkit/h264"
 )
 
 var (
@@ -63,11 +63,11 @@ var level1b = Limits{IDC: 11, MaxMBPS: 1485, MaxFS: 99, MaxDpbMbs: 396, MaxBR: 1
 
 func Level1b() Limits { return level1b }
 
-func Declared(s *syntax.SPS) (Limits, bool) {
+func Declared(s *h264.SPS) (Limits, bool) {
 	if s.IsLevel1b() {
 		return level1b, true
 	}
-	return Lookup(s.LevelIDC)
+	return Lookup(s.Level)
 }
 
 func (l Limits) DpbFrames(frameMBs int) int {
@@ -91,9 +91,9 @@ func MaxFrameSizeMBs() int {
 	return n
 }
 
-func checkGeometry(s *syntax.SPS, maxFS int, kind error, where string) error {
-	widthMBs := s.PicWidthInMbs()
-	heightMBs := s.FrameHeightInMbs()
+func checkGeometry(s *h264.SPS, maxFS int, kind error, where string) error {
+	widthMBs := int(s.MBWidth)
+	heightMBs := int(s.MBHeight)
 	if frameMBs := widthMBs * heightMBs; frameMBs > maxFS {
 		return fmt.Errorf("%w: %d macroblocks per frame, %s allows %d", kind, frameMBs, where, maxFS)
 	}
@@ -106,20 +106,20 @@ func checkGeometry(s *syntax.SPS, maxFS int, kind error, where string) error {
 	return nil
 }
 
-func CheckCeiling(s *syntax.SPS) error {
+func CheckCeiling(s *h264.SPS) error {
 	return checkGeometry(s, MaxFrameSizeMBs(), ErrAboveTable, "the highest level in Table A-1")
 }
 
-func CheckSPS(s *syntax.SPS) error {
+func CheckSPS(s *h264.SPS) error {
 	l, ok := Declared(s)
 	if !ok {
-		return fmt.Errorf("%w: level_idc %d", ErrUnknownLevel, s.LevelIDC)
+		return fmt.Errorf("%w: level_idc %d", ErrUnknownLevel, s.Level)
 	}
-	where := fmt.Sprintf("level %d", s.LevelIDC)
+	where := fmt.Sprintf("level %d", s.Level)
 	if err := checkGeometry(s, l.MaxFS, ErrExceedsLevel, where); err != nil {
 		return err
 	}
-	frameMBs := s.PicWidthInMbs() * s.FrameHeightInMbs()
+	frameMBs := int(s.MBWidth * s.MBHeight)
 	if dpb := l.DpbFrames(frameMBs); int(s.MaxNumRefFrames) > dpb {
 		return fmt.Errorf("%w: max_num_ref_frames %d, %s allows %d at this picture size",
 			ErrExceedsLevel, s.MaxNumRefFrames, where, dpb)
@@ -136,7 +136,7 @@ func isqrt(v int) int {
 }
 
 func cpbBrNalFactor(profileIDC uint8) int64 {
-	if profileIDC == syntax.ProfileHigh {
+	if profileIDC == profileHigh {
 		return 1500
 	}
 	return 1200
@@ -203,3 +203,6 @@ func Select(s Stream) (uint8, error) {
 		ErrNoLevel, s.Width, s.Height, s.FPSNum, s.FPSDen, s.RefFrames, s.PeakKbps, s.BufferKbits,
 		top.MaxFS, top.MaxMBPS, top.MaxBitsPerSecond(s.ProfileIDC)/1000, top.MaxBufferBits(s.ProfileIDC)/1000)
 }
+
+// profileHigh is profile_idc of the High profile, whose bit rate factors differ.
+const profileHigh = 100

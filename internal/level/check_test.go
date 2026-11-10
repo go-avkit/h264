@@ -4,17 +4,17 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/go-avkit/h264/internal/syntax"
+	h264 "github.com/go-avkit/h264"
 )
 
-func spsAt(levelIDC uint8, widthMBs, heightMBs int) *syntax.SPS {
-	return &syntax.SPS{
-		ProfileIDC:                syntax.ProfileMain,
-		LevelIDC:                  levelIDC,
-		ChromaFormatIDC:           syntax.Chroma420,
-		FrameMbsOnly:              true,
-		PicWidthInMbsMinus1:       uint32(widthMBs - 1),
-		PicHeightInMapUnitsMinus1: uint32(heightMBs - 1),
+func spsAt(levelIDC uint8, widthMBs, heightMBs int) *h264.SPS {
+	return &h264.SPS{
+		Profile:      77,
+		Level:        levelIDC,
+		ChromaFormat: 1,
+		FrameMBSOnly: true,
+		MBWidth:      uint32(widthMBs),
+		MBHeight:     uint32(heightMBs),
 	}
 }
 
@@ -26,7 +26,7 @@ func TestCheckSPSAcceptsTheLevelsOwnMaximum(t *testing.T) {
 			s = spsAt(l.IDC, bound, l.MaxFS/bound)
 		}
 		if err := CheckSPS(s); err != nil {
-			t.Fatalf("level %d at %dx%d macroblocks: %v", l.IDC, s.PicWidthInMbs(), s.FrameHeightInMbs(), err)
+			t.Fatalf("level %d at %dx%d macroblocks: %v", l.IDC, s.MBWidth, s.MBHeight, err)
 		}
 	}
 }
@@ -78,7 +78,7 @@ func TestCheckSPSRejectsLevelsOutsideTableA1(t *testing.T) {
 
 func TestDeclaredResolvesLevel1b(t *testing.T) {
 	s := spsAt(11, 1, 1)
-	s.ConstraintSet = 0x10
+	s.ConstraintFlags = 0x10
 	oneB, ok := Declared(s)
 	if !ok || oneB.MaxFS != 99 || oneB.MaxDpbMbs != 396 || oneB.MaxBR != 128 || oneB.MaxCPB != 350 {
 		t.Fatalf("level_idc 11 with constraint_set3_flag = %+v, %v", oneB, ok)
@@ -93,7 +93,7 @@ func TestDeclaredResolvesLevel1b(t *testing.T) {
 		t.Fatalf("level_idc 11 without constraint_set3_flag = %+v, %v, want level 1.1", full, ok)
 	}
 	high := spsAt(IDCLevel1bAlias, 1, 1)
-	high.ProfileIDC = syntax.ProfileHigh
+	high.Profile = 100
 	got, ok = Declared(high)
 	if !ok || got != oneB {
 		t.Fatalf("level_idc %d on a High profile stream = %+v, %v, want level 1b",
@@ -117,10 +117,10 @@ func TestDpbFramesNeverExceedsSixteen(t *testing.T) {
 
 func TestHighProfileDoesNotResolveLevel1b(t *testing.T) {
 	s := spsAt(11, 11, 9)
-	s.ProfileIDC = syntax.ProfileHigh
-	s.ConstraintSet = 0x10
-	s.PicWidthInMbsMinus1 = 21
-	s.PicHeightInMapUnitsMinus1 = 17
+	s.Profile = 100
+	s.ConstraintFlags = 0x10
+	s.MBWidth = 22
+	s.MBHeight = 18
 	if err := CheckSPS(s); err != nil {
 		t.Fatalf("High profile level 1.1 at 396 macroblocks: %v", err)
 	}

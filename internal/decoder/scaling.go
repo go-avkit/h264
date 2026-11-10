@@ -1,7 +1,7 @@
 package decoder
 
 import (
-	"github.com/go-avkit/h264/internal/syntax"
+	h264 "github.com/go-avkit/h264"
 	"github.com/go-avkit/h264/internal/transform"
 )
 
@@ -49,8 +49,8 @@ func rasterOrder8x8(scan [64]uint8) [64]uint8 {
 	return out
 }
 
-func buildScalingTables(sps *syntax.SPS, pps *syntax.PPS) *scalingTables {
-	scan4, scan8 := pps.ResolvedScalingLists(sps)
+func buildScalingTables(sps *h264.SPS, pps *h264.PPS) *scalingTables {
+	scan4, scan8 := pps.ResolvedScaling(*sps)
 	s := &scalingTables{flat: true}
 	for list := 0; list < 6; list++ {
 		w := rasterOrder4x4(scan4[list])

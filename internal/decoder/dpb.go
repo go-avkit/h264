@@ -3,8 +3,8 @@ package decoder
 import (
 	"sort"
 
+	h264 "github.com/go-avkit/h264"
 	"github.com/go-avkit/h264/internal/frame"
-	"github.com/go-avkit/h264/internal/syntax"
 )
 
 type refFrame struct {
@@ -27,12 +27,12 @@ type dpb struct {
 	prevFrameNum       uint32
 }
 
-func newDPB(sps *syntax.SPS) *dpb {
+func newDPB(sps *h264.SPS) *dpb {
 	n := int(sps.MaxNumRefFrames)
 	if n < 1 {
 		n = 1
 	}
-	return &dpb{maxNumRefs: n, maxFrameNum: sps.MaxFrameNum()}
+	return &dpb{maxNumRefs: n, maxFrameNum: uint32(1) << sps.Log2MaxFrameNum}
 }
 
 func (b *dpb) clear() {
@@ -43,10 +43,10 @@ func (b *dpb) clear() {
 	b.prevFrameNum = 0
 }
 
-func (b *dpb) computePOC(sps *syntax.SPS, hdr *syntax.SliceHeader) int {
-	switch sps.PicOrderCntType {
+func (b *dpb) computePOC(sps *h264.SPS, hdr *sliceHeader) int {
+	switch sps.POCType {
 	case 0:
-		maxLsb := int(sps.MaxPicOrderCntLsb())
+		maxLsb := int(1) << sps.Log2MaxPOCLSB
 		lsb := int(hdr.PicOrderCntLsb)
 		msb := 0
 		if hdr.IDR {
@@ -88,7 +88,7 @@ func (b *dpb) computePOC(sps *syntax.SPS, hdr *syntax.SliceHeader) int {
 	return b.pocType1(sps, hdr)
 }
 
-func (b *dpb) pocType1(sps *syntax.SPS, hdr *syntax.SliceHeader) int {
+func (b *dpb) pocType1(sps *h264.SPS, hdr *sliceHeader) int {
 	offset := 0
 	if !hdr.IDR {
 		offset = b.prevFrameNumOffset
@@ -167,7 +167,7 @@ func (b *dpb) remove(target *refFrame) {
 	}
 }
 
-func (b *dpb) buildListP(hdr *syntax.SliceHeader, active int) []*frame.Picture {
+func (b *dpb) buildListP(hdr *sliceHeader, active int) []*frame.Picture {
 	shortTerm := make([]*refFrame, 0, len(b.refs))
 	longTerm := make([]*refFrame, 0, len(b.refs))
 	for _, r := range b.refs {
@@ -220,7 +220,7 @@ func sameFrames(a, b []*refFrame) bool {
 	return true
 }
 
-func (b *dpb) buildListsB(hdr *syntax.SliceHeader, currPOC, activeL0, activeL1 int) ([]*frame.Picture, []*frame.Picture) {
+func (b *dpb) buildListsB(hdr *sliceHeader, currPOC, activeL0, activeL1 int) ([]*frame.Picture, []*frame.Picture) {
 	before, after, long := b.splitByOrder(currPOC)
 
 	list0 := make([]*refFrame, 0, len(b.refs))
@@ -254,7 +254,7 @@ func truncate(list []*refFrame, active int) []*frame.Picture {
 	return out
 }
 
-func (b *dpb) applyModifications(list []*refFrame, mods []syntax.RefPicListModification, frameNum uint32, active int) []*refFrame {
+func (b *dpb) applyModifications(list []*refFrame, mods []refListMod, frameNum uint32, active int) []*refFrame {
 	predPicNum := int(frameNum)
 	refIdx := 0
 	for _, m := range mods {
@@ -308,7 +308,7 @@ func moveToIndex(list []*refFrame, target *refFrame, idx int) []*refFrame {
 	return out
 }
 
-func (b *dpb) store(pic *frame.Picture, hdr *syntax.SliceHeader) {
+func (b *dpb) store(pic *frame.Picture, hdr *sliceHeader) {
 	if hdr.NalRefIDC == 0 {
 		return
 	}
@@ -345,7 +345,7 @@ func (b *dpb) enforceCapacity() {
 	b.refs = append(b.refs[:0], b.refs[len(b.refs)-n:]...)
 }
 
-func (b *dpb) applyMMCO(hdr *syntax.SliceHeader, current *refFrame) {
+func (b *dpb) applyMMCO(hdr *sliceHeader, current *refFrame) {
 	for _, m := range hdr.MMCOs {
 		switch m.Op {
 		case 1:

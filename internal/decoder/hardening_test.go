@@ -99,12 +99,12 @@ func TestLevel1bIsAcceptedAtItsOwnFrameSize(t *testing.T) {
 	sps.ConstraintSet = 0x10
 	sps.PicWidthInMbsMinus1 = 10
 	sps.PicHeightInMapUnitsMinus1 = 8
-	if err := level.CheckSPS(sps); err != nil {
+	if err := level.CheckSPS(rootSPS(sps)); err != nil {
 		t.Fatalf("level 1b at 99 macroblocks: %v", err)
 	}
 	sps.PicWidthInMbsMinus1 = 21
 	sps.PicHeightInMapUnitsMinus1 = 17
-	if err := level.CheckSPS(sps); !errors.Is(err, level.ErrExceedsLevel) {
+	if err := level.CheckSPS(rootSPS(sps)); !errors.Is(err, level.ErrExceedsLevel) {
 		t.Fatalf("level 1b at 396 macroblocks: %v, want ErrExceedsLevel", err)
 	}
 }
@@ -174,7 +174,7 @@ func TestLongTermMarkingCannotGrowTheReferenceListForever(t *testing.T) {
 	for i := 0; i < 64; i++ {
 		hdr := newTestHeader(uint32(i%16), false, 1)
 		hdr.AdaptiveRefPicMarking = true
-		hdr.MMCOs = []syntax.MMCO{{Op: 6, LongTermFrameIdx: uint32(i)}}
+		hdr.MMCOs = []mmco{{Op: 6, LongTermFrameIdx: uint32(i)}}
 		b.store(frame.NewPicture(1, 1), hdr)
 		if len(b.refs) > 2 {
 			t.Fatalf("after %d long term pictures the buffer holds %d references, want at most 2",
@@ -334,7 +334,7 @@ func TestAPictureAboveItsDeclaredLevelStillDecodesByDefault(t *testing.T) {
 	sps.LevelIDC = 10
 	sps.PicWidthInMbsMinus1 = 39
 	sps.PicHeightInMapUnitsMinus1 = 39
-	if err := level.CheckSPS(sps); err == nil {
+	if err := level.CheckSPS(rootSPS(sps)); err == nil {
 		t.Fatal("this picture is meant to exceed level 1.0, so the test proves nothing")
 	}
 	d := New()

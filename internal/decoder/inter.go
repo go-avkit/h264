@@ -5,7 +5,6 @@ import (
 
 	"github.com/go-avkit/h264/internal/frame"
 	"github.com/go-avkit/h264/internal/mc"
-	"github.com/go-avkit/h264/internal/syntax"
 	"github.com/go-avkit/h264/internal/transform"
 )
 
@@ -290,7 +289,7 @@ func (d *sliceDecoder) predictOne(list int, seg motionSegment, x, y int,
 	return true
 }
 
-func (d *sliceDecoder) weightEntry(list int, ref int8) *syntax.WeightEntry {
+func (d *sliceDecoder) weightEntry(list int, ref int8) *weightEntry {
 	if d.weights == nil {
 		return nil
 	}

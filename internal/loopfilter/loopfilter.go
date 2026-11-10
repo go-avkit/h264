@@ -1,10 +1,10 @@
 package loopfilter
 
 import (
+	h264 "github.com/go-avkit/h264"
 	"github.com/go-avkit/h264/internal/deblock"
 	"github.com/go-avkit/h264/internal/frame"
 	"github.com/go-avkit/h264/internal/parallel"
-	"github.com/go-avkit/h264/internal/syntax"
 )
 
 type MB struct {
@@ -217,8 +217,8 @@ func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int) {
 	planes := [2][]byte{c.pic.Cb, c.pic.Cr}
 	for plane := 0; plane < 2; plane++ {
 		qpc := deblock.AverageQP(
-			syntax.ChromaQP(p.filterQPY(), offsets[plane]),
-			syntax.ChromaQP(cur.filterQPY(), offsets[plane]))
+			h264.ChromaQP(p.filterQPY(), offsets[plane]),
+			h264.ChromaQP(cur.filterQPY(), offsets[plane]))
 		deblock.FilterChromaEdgeVertical(planes[plane], c.pic.StrideC,
 			c.pic.ChromaOffset(cx, mby*8), bs,
 			deblock.IndexA(qpc, cur.AlphaOffset), deblock.IndexB(qpc, cur.BetaOffset))
@@ -267,8 +267,8 @@ func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int) {
 	planes := [2][]byte{c.pic.Cb, c.pic.Cr}
 	for plane := 0; plane < 2; plane++ {
 		qpc := deblock.AverageQP(
-			syntax.ChromaQP(p.filterQPY(), offsets[plane]),
-			syntax.ChromaQP(cur.filterQPY(), offsets[plane]))
+			h264.ChromaQP(p.filterQPY(), offsets[plane]),
+			h264.ChromaQP(cur.filterQPY(), offsets[plane]))
 		deblock.FilterChromaEdgeHorizontal(planes[plane], c.pic.StrideC,
 			c.pic.ChromaOffset(mbx*8, cy), bs,
 			deblock.IndexA(qpc, cur.AlphaOffset), deblock.IndexB(qpc, cur.BetaOffset))

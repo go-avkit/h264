@@ -447,3 +447,30 @@ func TestResolvedScalingFollowsTable72(t *testing.T) {
 		t.Errorf("picture set 8x8 lists at 4:4:4")
 	}
 }
+
+// TestASetThatCannotBeAPictureIsRefused: the bounds the decoder's own reader had
+// and this one lacked, each at its edge.
+func TestASetThatCannotBeAPictureIsRefused(t *testing.T) {
+	ok := baseSet()
+	if _, err := ParseSPS(ok.build()); err != nil {
+		t.Fatal(err)
+	}
+	wide := baseSet()
+	wide.mbWidth = 1025
+	tall := baseSet()
+	tall.mapUnits = 1025
+	whole := baseSet() // 32x32 with 4:2:0 crop units of 2: 8 units on each side take 32
+	whole.crop = [4]uint32{8, 8, 0, 0}
+	huge := baseSet()
+	huge.crop = [4]uint32{1 << 31, 1 << 31, 0, 0}
+	for name, s := range map[string]set{"too wide": wide, "too tall": tall, "cropped away": whole, "a crop that wraps": huge} {
+		if _, err := ParseSPS(s.build()); !errors.Is(err, ErrUnsupportedSPS) {
+			t.Errorf("%s: %v, want ErrUnsupportedSPS", name, err)
+		}
+	}
+	edge := baseSet()
+	edge.mbWidth = 1024
+	if _, err := ParseSPS(edge.build()); err != nil {
+		t.Errorf("1024 macroblocks across: %v", err)
+	}
+}

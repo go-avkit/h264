@@ -194,8 +194,16 @@ func ParseSPS(u Unit) (SPS, error) {
 	s.MaxNumRefFrames = r.ue()
 	s.GapsAllowed = r.flag()
 
-	s.MBWidth = r.ue() + 1
-	mapUnits := r.ue() + 1
+	// ⛔ Both are read BEFORE the +1 the syntax carries, which wraps to zero at the
+	// top of the range, and both are bounded: they size every plane and every
+	// per-macroblock table a decoder allocates. 1024 macroblocks is 16 384 samples.
+	widthMinus1, mapMinus1 := r.ue(), r.ue()
+	if r.err == nil && (widthMinus1 >= maxMBsAcross || mapMinus1 >= maxMBsAcross) {
+		return s, fmt.Errorf("%w: a picture of %d by %d macroblocks, at most %d across",
+			ErrUnsupportedSPS, uint64(widthMinus1)+1, uint64(mapMinus1)+1, maxMBsAcross)
+	}
+	s.MBWidth = widthMinus1 + 1
+	mapUnits := mapMinus1 + 1
 	s.FrameMBSOnly = r.flag()
 	if !s.FrameMBSOnly {
 		s.MBAdaptive = r.flag()
@@ -214,7 +222,15 @@ func ParseSPS(u Unit) (SPS, error) {
 	if r.err != nil {
 		return s, r.err
 	}
-	s.size()
+	// ⛔ The identifier names a slot of 32, and the reference count is bounded by the
+	// largest level (A.3.1): 16 frames.
+	if s.ID > 31 || s.MaxNumRefFrames > maxBufferedFrames {
+		return s, fmt.Errorf("%w: seq_parameter_set_id %d and max_num_ref_frames %d",
+			ErrUnsupportedSPS, s.ID, s.MaxNumRefFrames)
+	}
+	if err := s.size(); err != nil {
+		return s, err
+	}
 
 	// ⛔ The size is settled by here, so a VUI that is malformed does not take it
 	// away: the set is returned with the error, as a high profile's is, and a caller
@@ -302,7 +318,7 @@ func (s *SPS) readPicOrderCnt(r *sticky) error {
 // format AND on whether frames are the only coding. A reader that treated the
 // values as samples would take eight lines off a 4:2:0 frame where sixteen were
 // meant, and report 1084 for a picture everything else calls 1080.
-func (s *SPS) size() {
+func (s *SPS) size() error {
 	s.Width = s.MBWidth * 16
 	s.Height = s.MBHeight * 16
 
@@ -329,9 +345,20 @@ func (s *SPS) size() {
 	if !s.FrameMBSOnly {
 		cropY *= 2
 	}
-	s.Width -= cropX * (s.CropLeft + s.CropRight)
-	s.Height -= cropY * (s.CropTop + s.CropBottom)
+	// ⛔ In 64 bits: four 32-bit offsets and a unit sum past what a uint32 holds, and
+	// a difference that wrapped would read as a very large picture.
+	cutX := uint64(cropX) * (uint64(s.CropLeft) + uint64(s.CropRight))
+	cutY := uint64(cropY) * (uint64(s.CropTop) + uint64(s.CropBottom))
+	if cutX >= uint64(s.Width) || cutY >= uint64(s.Height) {
+		return fmt.Errorf("%w: cropping removes the whole %dx%d picture", ErrUnsupportedSPS, s.Width, s.Height)
+	}
+	s.Width -= uint32(cutX)
+	s.Height -= uint32(cutY)
+	return nil
 }
+
+// maxMBsAcross bounds a picture's width and height in macroblocks.
+const maxMBsAcross = 1024
 
 // narrowed reads a field that is kept in a byte, and refuses it before the
 // conversion that would narrow it.

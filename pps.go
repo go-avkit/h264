@@ -165,3 +165,15 @@ func ParsePPS(u Unit, sps SPS) (PPS, error) {
 	}
 	return p, nil
 }
+
+// PPSIDs reads pic_parameter_set_id and seq_parameter_set_id, the first two fields
+// of a picture parameter set, so that a caller holding sequence sets by id can hand
+// ParsePPS the one the set names.
+func PPSIDs(u Unit) (id, spsID uint32, err error) {
+	if u.Type != UnitPPS {
+		return 0, 0, fmt.Errorf("%w: type %d", ErrNotPPS, u.Type)
+	}
+	r := newSticky(u.Unescape())
+	id, spsID = r.ue(), r.ue()
+	return id, spsID, r.err
+}
