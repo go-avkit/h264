@@ -99,15 +99,18 @@ func TestJVTConformance(t *testing.T) {
 				t.Fatal(err)
 			}
 			d := New(Limits{MaxFrameMBs: 1 << 17})
+			// A picture is valid until the next call, so each call's pictures
+			// are hashed before the next one is made.
 			frames, err := d.Decode(data)
 			if err != nil {
 				t.Fatal(err)
 			}
+			got := frameSums(frames)
 			rest, err := d.Flush()
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := frameSums(append(frames, rest...))
+			got = append(got, frameSums(rest)...)
 			want := manifest(t, m)
 			match := slices.Equal(got, want)
 			switch {

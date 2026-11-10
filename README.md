@@ -31,6 +31,12 @@ rest, err := d.Flush()
 i420 := frames[0].AppendI420(nil)
 ```
 
+**A `Frame` is valid until the next call to `Decode` or `Flush`:** the decoder
+reuses the planes of a picture that is no longer a reference for a later one
+(copy it, or use `AppendI420`, to keep it longer). A macroblock that a corrupt
+stream never states keeps the samples of the picture that was there before, not
+zero.
+
 The root package (parsers and derivations, 100 % covered) and the decoder are two
 layers of one module. The decoder was **imported from
 [`oops1/go.264`](https://github.com/oops1/go.264) v1.12.0 (commit `3373a3f`)**,
