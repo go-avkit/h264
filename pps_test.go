@@ -389,3 +389,19 @@ func TestAQuantiserOutsideTheTables(t *testing.T) {
 		}
 	}
 }
+
+func TestPPSIDsAreTheFirstTwoFields(t *testing.T) {
+	w := &spsWriter{}
+	w.ue(7)
+	w.ue(3)
+	id, sps, err := PPSIDs(Unit{Type: UnitPPS, Payload: w.data})
+	if err != nil || id != 7 || sps != 3 {
+		t.Fatalf("%d %d %v", id, sps, err)
+	}
+	if _, _, err := PPSIDs(Unit{Type: UnitSPS}); !errors.Is(err, ErrNotPPS) {
+		t.Errorf("not a PPS: %v", err)
+	}
+	if _, _, err := PPSIDs(Unit{Type: UnitPPS}); err == nil {
+		t.Error("an empty set has ids")
+	}
+}

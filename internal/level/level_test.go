@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/go-avkit/h264/internal/syntax"
+	h264 "github.com/go-avkit/h264"
 )
 
 func TestTableIsMonotonic(t *testing.T) {
@@ -52,12 +52,7 @@ func TestTableIsMonotonic(t *testing.T) {
 
 func TestTableMatchesTheDecoderBufferSizes(t *testing.T) {
 	for _, l := range table {
-		sps := &syntax.SPS{
-			LevelIDC:                  l.IDC,
-			PicWidthInMbsMinus1:       0,
-			PicHeightInMapUnitsMinus1: 0,
-			FrameMbsOnly:              true,
-		}
+		sps := &h264.SPS{Level: l.IDC, MBWidth: 1, MBHeight: 1, FrameMBSOnly: true}
 		want := l.MaxDpbMbs
 		if want > 16 {
 			want = 16
@@ -104,21 +99,21 @@ func TestMaxRatesFollowTheProfileFactor(t *testing.T) {
 	if !ok {
 		t.Fatal("level 31 is missing from the table")
 	}
-	main := l.MaxBitsPerSecond(syntax.ProfileMain)
-	high := l.MaxBitsPerSecond(syntax.ProfileHigh)
+	main := l.MaxBitsPerSecond(77)
+	high := l.MaxBitsPerSecond(100)
 	if main != int64(l.MaxBR)*1200 {
 		t.Errorf("level 31 allows %d bit/s in Main profile, want %d", main, int64(l.MaxBR)*1200)
 	}
 	if high != int64(l.MaxBR)*1500 {
 		t.Errorf("level 31 allows %d bit/s in High profile, want %d", high, int64(l.MaxBR)*1500)
 	}
-	if l.MaxBufferBits(syntax.ProfileBaseline) != int64(l.MaxCPB)*1200 {
+	if l.MaxBufferBits(66) != int64(l.MaxCPB)*1200 {
 		t.Errorf("level 31 holds %d bits of buffer in Baseline profile, want %d",
-			l.MaxBufferBits(syntax.ProfileBaseline), int64(l.MaxCPB)*1200)
+			l.MaxBufferBits(66), int64(l.MaxCPB)*1200)
 	}
-	if l.MaxBufferBits(syntax.ProfileHigh) != int64(l.MaxCPB)*1500 {
+	if l.MaxBufferBits(100) != int64(l.MaxCPB)*1500 {
 		t.Errorf("level 31 holds %d bits of buffer in High profile, want %d",
-			l.MaxBufferBits(syntax.ProfileHigh), int64(l.MaxCPB)*1500)
+			l.MaxBufferBits(100), int64(l.MaxCPB)*1500)
 	}
 }
 
@@ -148,7 +143,7 @@ func TestSelectTakesTheSmallestLevelThatFits(t *testing.T) {
 		{"2160p", Stream{Width: 3840, Height: 2160, FPSNum: 30, FPSDen: 1}, 51},
 		{"720p with a bitrate", Stream{Width: 1280, Height: 720, FPSNum: 30, FPSDen: 1, PeakKbps: 20000}, 32},
 		{"720p in High profile", Stream{Width: 1280, Height: 720, FPSNum: 30, FPSDen: 1,
-			PeakKbps: 20000, ProfileIDC: syntax.ProfileHigh}, 31},
+			PeakKbps: 20000, ProfileIDC: 100}, 31},
 		{"720p with a buffer", Stream{Width: 1280, Height: 720, FPSNum: 30, FPSDen: 1,
 			PeakKbps: 20000, BufferKbits: 40000}, 41},
 		{"720p with references", Stream{Width: 1280, Height: 720, FPSNum: 30, FPSDen: 1, RefFrames: 6}, 40},
@@ -170,7 +165,7 @@ func TestSelectHoldsWhatItAnnounces(t *testing.T) {
 		{Width: 176, Height: 144, FPSNum: 15, FPSDen: 1},
 		{Width: 1280, Height: 720, FPSNum: 30, FPSDen: 1, RefFrames: 4, PeakKbps: 8000, BufferKbits: 16000},
 		{Width: 1920, Height: 1080, FPSNum: 60, FPSDen: 1, RefFrames: 2, PeakKbps: 40000,
-			BufferKbits: 40000, ProfileIDC: syntax.ProfileHigh},
+			BufferKbits: 40000, ProfileIDC: 100},
 		{Width: 3840, Height: 2160, FPSNum: 30, FPSDen: 1, RefFrames: 3, PeakKbps: 60000},
 	}
 	for _, s := range streams {

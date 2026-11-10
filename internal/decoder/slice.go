@@ -3,18 +3,18 @@ package decoder
 import (
 	"fmt"
 
+	h264 "github.com/go-avkit/h264"
 	"github.com/go-avkit/h264/internal/bits"
 	"github.com/go-avkit/h264/internal/cabac"
 	"github.com/go-avkit/h264/internal/frame"
 	"github.com/go-avkit/h264/internal/loopfilter"
-	"github.com/go-avkit/h264/internal/syntax"
 )
 
 type sliceDecoder struct {
 	r    *bits.Reader
-	sps  *syntax.SPS
-	pps  *syntax.PPS
-	hdr  *syntax.SliceHeader
+	sps  *h264.SPS
+	pps  *h264.PPS
+	hdr  *sliceHeader
 	pic  *frame.Picture
 	grid *mbGrid
 
@@ -26,7 +26,7 @@ type sliceDecoder struct {
 	colocated       *frame.Picture
 	colShortTerm    bool
 	direct8x8       bool
-	weights         *syntax.PredWeightTable
+	weights         *predWeights
 	weightMode      int
 
 	predA predBuffer
@@ -64,7 +64,7 @@ func (d *sliceDecoder) transform8x8Inc() int {
 }
 
 func (d *sliceDecoder) mayUse8x8Transform() bool {
-	return d.pps.Transform8x8Mode && d.cur.cbpLuma != 0 && d.subPartsAtLeast8x8
+	return d.pps.Transform8x8 && d.cur.cbpLuma != 0 && d.subPartsAtLeast8x8
 }
 
 func (d *sliceDecoder) totalMBs() int { return d.grid.widthMBs * d.grid.heightMBs }
@@ -77,7 +77,7 @@ func (d *sliceDecoder) startMB(mbAddr int) {
 		MB: loopfilter.MB{
 			SliceID:        d.sliceID,
 			QPY:            d.qpY,
-			ChromaQPOffset: [2]int{int(d.pps.ChromaQPIndexOffset), int(d.pps.SecondChromaQPIndexOffset)},
+			ChromaQPOffset: [2]int{int(d.pps.ChromaQPIndexOffset), int(d.pps.SecondChromaQPOffset)},
 			DisableDeblock: d.hdr.DisableDeblockingFilterIDC,
 			AlphaOffset:    int(d.hdr.SliceAlphaC0OffsetDiv2) * 2,
 			BetaOffset:     int(d.hdr.SliceBetaOffsetDiv2) * 2,
@@ -93,7 +93,7 @@ func (d *sliceDecoder) startMB(mbAddr int) {
 }
 
 func (d *sliceDecoder) run() error {
-	d.qpY = d.hdr.QPY(d.pps)
+	d.qpY = d.hdr.QPY()
 	d.constrained = d.pps.ConstrainedIntraPred
 	if d.pps.CABAC {
 		d.cb = &cabac.Decoder{}

@@ -240,7 +240,7 @@ func (d *sliceDecoder) decodeIntraMBCABAC(info mbTypeInfo, res *mbResidual) erro
 		return d.cb.Restart(d.r)
 
 	case mbTypeINxN:
-		if d.pps.Transform8x8Mode {
+		if d.pps.Transform8x8 {
 			d.cur.Transform8x8 = d.cb.TransformSize8x8Flag(d.transform8x8Inc())
 		}
 		if d.cur.Transform8x8 {

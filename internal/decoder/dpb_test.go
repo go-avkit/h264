@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
+	h264 "github.com/go-avkit/h264"
 	"github.com/go-avkit/h264/internal/frame"
-	"github.com/go-avkit/h264/internal/syntax"
 )
 
 func newRef(frameNum uint32, longTerm bool, idx int) *refFrame {
@@ -16,8 +16,8 @@ func newCurrent() *refFrame {
 	return &refFrame{pic: frame.NewPicture(1, 1)}
 }
 
-func newTestHeader(frameNum uint32, idr bool, nalRefIDC uint8) *syntax.SliceHeader {
-	return &syntax.SliceHeader{FrameNum: frameNum, IDR: idr, NalRefIDC: nalRefIDC}
+func newTestHeader(frameNum uint32, idr bool, nalRefIDC uint8) *sliceHeader {
+	return &sliceHeader{FrameNum: frameNum, IDR: idr, NalRefIDC: nalRefIDC}
 }
 
 func assertRefOrder(t *testing.T, got, want []*refFrame) {
@@ -33,13 +33,13 @@ func assertRefOrder(t *testing.T, got, want []*refFrame) {
 }
 
 func TestComputePOCType0(t *testing.T) {
-	sps := &syntax.SPS{PicOrderCntType: 0, Log2MaxPicOrderCntLsbMinus4: 0}
+	sps := &h264.SPS{POCType: 0, Log2MaxPOCLSB: 4}
 
 	cases := []struct {
 		name        string
 		initMsb     int
 		initLsb     int
-		hdr         *syntax.SliceHeader
+		hdr         *sliceHeader
 		wantPOC     int
 		wantPrevMsb int
 		wantPrevLsb int
@@ -48,7 +48,7 @@ func TestComputePOCType0(t *testing.T) {
 			name:        "idr resets previous msb",
 			initMsb:     5,
 			initLsb:     10,
-			hdr:         &syntax.SliceHeader{IDR: true, PicOrderCntLsb: 3, NalRefIDC: 1},
+			hdr:         &sliceHeader{IDR: true, PicOrderCntLsb: 3, NalRefIDC: 1},
 			wantPOC:     3,
 			wantPrevMsb: 0,
 			wantPrevLsb: 3,
@@ -57,7 +57,7 @@ func TestComputePOCType0(t *testing.T) {
 			name:        "normal increasing sequence",
 			initMsb:     0,
 			initLsb:     3,
-			hdr:         &syntax.SliceHeader{PicOrderCntLsb: 5, NalRefIDC: 1},
+			hdr:         &sliceHeader{PicOrderCntLsb: 5, NalRefIDC: 1},
 			wantPOC:     5,
 			wantPrevMsb: 0,
 			wantPrevLsb: 5,
@@ -66,7 +66,7 @@ func TestComputePOCType0(t *testing.T) {
 			name:        "wrap up: lsb drops by more than half range, msb increases",
 			initMsb:     0,
 			initLsb:     14,
-			hdr:         &syntax.SliceHeader{PicOrderCntLsb: 2, NalRefIDC: 1},
+			hdr:         &sliceHeader{PicOrderCntLsb: 2, NalRefIDC: 1},
 			wantPOC:     18,
 			wantPrevMsb: 16,
 			wantPrevLsb: 2,
@@ -75,7 +75,7 @@ func TestComputePOCType0(t *testing.T) {
 			name:        "wrap down: lsb rises by more than half range, msb decreases",
 			initMsb:     16,
 			initLsb:     2,
-			hdr:         &syntax.SliceHeader{PicOrderCntLsb: 15, NalRefIDC: 1},
+			hdr:         &sliceHeader{PicOrderCntLsb: 15, NalRefIDC: 1},
 			wantPOC:     15,
 			wantPrevMsb: 0,
 			wantPrevLsb: 15,
@@ -84,7 +84,7 @@ func TestComputePOCType0(t *testing.T) {
 			name:        "non-reference picture does not update stored state",
 			initMsb:     0,
 			initLsb:     5,
-			hdr:         &syntax.SliceHeader{PicOrderCntLsb: 6, NalRefIDC: 0},
+			hdr:         &sliceHeader{PicOrderCntLsb: 6, NalRefIDC: 0},
 			wantPOC:     6,
 			wantPrevMsb: 0,
 			wantPrevLsb: 5,
@@ -106,7 +106,7 @@ func TestComputePOCType0(t *testing.T) {
 }
 
 func TestComputePOCType2(t *testing.T) {
-	sps := &syntax.SPS{PicOrderCntType: 2}
+	sps := &h264.SPS{POCType: 2}
 
 	t.Run("reference and non-reference formula", func(t *testing.T) {
 		b := &dpb{maxFrameNum: 16}
@@ -143,8 +143,8 @@ func TestComputePOCType2(t *testing.T) {
 }
 
 func TestPocType1AcrossMultipleCycles(t *testing.T) {
-	sps := &syntax.SPS{
-		PicOrderCntType:    1,
+	sps := &h264.SPS{
+		POCType:            1,
 		OffsetForRefFrame:  []int32{4, 2, 1},
 		OffsetForNonRefPic: -1,
 	}
@@ -166,7 +166,7 @@ func TestPocType1AcrossMultipleCycles(t *testing.T) {
 		{frameNum: 6, nalRefIDC: 1, delta0: 5, want: 19},
 	}
 	for _, c := range cases {
-		hdr := &syntax.SliceHeader{FrameNum: c.frameNum, IDR: c.idr, NalRefIDC: c.nalRefIDC}
+		hdr := &sliceHeader{FrameNum: c.frameNum, IDR: c.idr, NalRefIDC: c.nalRefIDC}
 		hdr.DeltaPicOrderCnt[0] = c.delta0
 		got := b.computePOC(sps, hdr)
 		if got != c.want {
@@ -176,8 +176,8 @@ func TestPocType1AcrossMultipleCycles(t *testing.T) {
 }
 
 func TestPocType1FrameNumWrap(t *testing.T) {
-	sps := &syntax.SPS{
-		PicOrderCntType:    1,
+	sps := &h264.SPS{
+		POCType:            1,
 		OffsetForRefFrame:  []int32{4, 2, 1},
 		OffsetForNonRefPic: -1,
 	}
@@ -284,7 +284,7 @@ func TestBuildListPOrderingAndTruncation(t *testing.T) {
 	l1, l2 := mkLT(5), mkLT(2)
 
 	b := &dpb{refs: []*refFrame{s1, s2, s3, s4, s5, l1, l2}}
-	hdr := &syntax.SliceHeader{}
+	hdr := &sliceHeader{}
 
 	t.Run("truncated to the active count", func(t *testing.T) {
 		out := b.buildListP(hdr, 3)
@@ -320,10 +320,10 @@ func TestBuildListPAppliesModifications(t *testing.T) {
 	rB.picNum = 2
 	b := &dpb{maxFrameNum: 16, refs: []*refFrame{rA, rB}}
 
-	hdr := &syntax.SliceHeader{
+	hdr := &sliceHeader{
 		FrameNum:              5,
 		ModificationL0Present: true,
-		RefPicListModificationL0: []syntax.RefPicListModification{
+		RefPicListModificationL0: []refListMod{
 			{IDC: 0, Value: 3}, // diff=4, predPicNum=5-4=1 -> targets rA
 		},
 	}
@@ -344,7 +344,7 @@ func TestApplyModificationsStopsAtActiveCount(t *testing.T) {
 	b := &dpb{maxFrameNum: 16, refs: []*refFrame{rOther, rA, rB}}
 	list := []*refFrame{rOther, rA, rB}
 
-	mods := []syntax.RefPicListModification{
+	mods := []refListMod{
 		{IDC: 0, Value: 0}, // predPicNum=5-1=4 -> rA, refIdx becomes 1 == active: loop must break here
 		{IDC: 0, Value: 5}, // would target rB if it were processed
 	}
@@ -358,11 +358,11 @@ func TestStoreAppliesMMCOBeforeAppending(t *testing.T) {
 	toRemove.picNum = 7
 	b := &dpb{maxNumRefs: 4, maxFrameNum: 16, refs: []*refFrame{toRemove}}
 	pic := frame.NewPicture(1, 1)
-	hdr := &syntax.SliceHeader{
+	hdr := &sliceHeader{
 		NalRefIDC:             1,
 		FrameNum:              10,
 		AdaptiveRefPicMarking: true,
-		MMCOs:                 []syntax.MMCO{{Op: 1, DifferenceOfPicNumsMinus1: 2}}, // pn = 10-2-1 = 7
+		MMCOs:                 []mmco{{Op: 1, DifferenceOfPicNumsMinus1: 2}}, // pn = 10-2-1 = 7
 	}
 
 	b.store(pic, hdr)
@@ -409,7 +409,7 @@ func TestApplyModifications(t *testing.T) {
 	b := &dpb{maxFrameNum: 16, refs: []*refFrame{rOther, rA, rB, rC, rLT}}
 	list := []*refFrame{rOther, rA, rB, rC, rLT}
 
-	mods := []syntax.RefPicListModification{
+	mods := []refListMod{
 		{IDC: 0, Value: 0},
 		{IDC: 0, Value: 5},
 		{IDC: 1, Value: 2},
@@ -429,7 +429,7 @@ func TestApplyMMCOOp1RemovesShortTerm(t *testing.T) {
 	keep.picNum = 99
 	b := &dpb{refs: []*refFrame{target, keep}}
 
-	hdr := &syntax.SliceHeader{FrameNum: 10, MMCOs: []syntax.MMCO{
+	hdr := &sliceHeader{FrameNum: 10, MMCOs: []mmco{
 		{Op: 1, DifferenceOfPicNumsMinus1: 2},  // pn = 10-2-1 = 7
 		{Op: 1, DifferenceOfPicNumsMinus1: 50}, // pn = 10-50-1 = -41: absent, no-op
 	}}
@@ -443,7 +443,7 @@ func TestApplyMMCOOp2RemovesLongTerm(t *testing.T) {
 	keep := newRef(0, true, 6)
 	b := &dpb{refs: []*refFrame{target, keep}}
 
-	hdr := &syntax.SliceHeader{MMCOs: []syntax.MMCO{
+	hdr := &sliceHeader{MMCOs: []mmco{
 		{Op: 2, LongTermPicNum: 5},
 		{Op: 2, LongTermPicNum: 42}, // absent, no-op
 	}}
@@ -457,7 +457,7 @@ func TestApplyMMCOOp3ConvertsToLongTerm(t *testing.T) {
 	r.picNum = 9
 	b := &dpb{refs: []*refFrame{r}}
 
-	hdr := &syntax.SliceHeader{FrameNum: 10, MMCOs: []syntax.MMCO{
+	hdr := &sliceHeader{FrameNum: 10, MMCOs: []mmco{
 		{Op: 3, DifferenceOfPicNumsMinus1: 0, LongTermFrameIdx: 8}, // pn = 10-0-1 = 9
 	}}
 	b.applyMMCO(hdr, newCurrent())
@@ -472,7 +472,7 @@ func TestApplyMMCOOp3AbsentPictureIsNoop(t *testing.T) {
 	r.picNum = 9
 	b := &dpb{refs: []*refFrame{r}}
 
-	hdr := &syntax.SliceHeader{FrameNum: 10, MMCOs: []syntax.MMCO{
+	hdr := &sliceHeader{FrameNum: 10, MMCOs: []mmco{
 		{Op: 3, DifferenceOfPicNumsMinus1: 99, LongTermFrameIdx: 8},
 	}}
 	b.applyMMCO(hdr, newCurrent())
@@ -490,7 +490,7 @@ func TestApplyMMCOOp4DropsAboveMaxLongTermIdx(t *testing.T) {
 	short := newRef(0, false, 0)
 	b := &dpb{refs: []*refFrame{keep1, keep2, drop1, drop2, short}}
 
-	hdr := &syntax.SliceHeader{MMCOs: []syntax.MMCO{
+	hdr := &sliceHeader{MMCOs: []mmco{
 		{Op: 4, MaxLongTermFrameIdxPlus1: 3}, // max = 2
 	}}
 	b.applyMMCO(hdr, newCurrent())
@@ -500,7 +500,7 @@ func TestApplyMMCOOp4DropsAboveMaxLongTermIdx(t *testing.T) {
 
 func TestApplyMMCOOp5ClearsBuffer(t *testing.T) {
 	b := &dpb{refs: []*refFrame{newRef(0, false, 0), newRef(0, true, 1)}}
-	hdr := &syntax.SliceHeader{MMCOs: []syntax.MMCO{{Op: 5}}}
+	hdr := &sliceHeader{MMCOs: []mmco{{Op: 5}}}
 	b.applyMMCO(hdr, newCurrent())
 
 	if len(b.refs) != 0 {
@@ -513,7 +513,7 @@ func TestApplyMMCOOp6MarksCurrentPictureLongTerm(t *testing.T) {
 	b := &dpb{refs: []*refFrame{keep}}
 	current := newCurrent()
 
-	hdr := &syntax.SliceHeader{MMCOs: []syntax.MMCO{{Op: 6, LongTermFrameIdx: 4}}}
+	hdr := &sliceHeader{MMCOs: []mmco{{Op: 6, LongTermFrameIdx: 4}}}
 	b.applyMMCO(hdr, current)
 
 	if !current.longTerm || current.longTermIdx != 4 {
@@ -531,7 +531,7 @@ func TestApplyMMCOOp6EvictsThePictureAlreadyHoldingTheIndex(t *testing.T) {
 	b := &dpb{refs: []*refFrame{holder, other}}
 	current := newCurrent()
 
-	hdr := &syntax.SliceHeader{MMCOs: []syntax.MMCO{{Op: 6, LongTermFrameIdx: 4}}}
+	hdr := &sliceHeader{MMCOs: []mmco{{Op: 6, LongTermFrameIdx: 4}}}
 	b.applyMMCO(hdr, current)
 
 	assertRefOrder(t, b.refs, []*refFrame{other})
@@ -543,11 +543,11 @@ func TestApplyMMCOOp6EvictsThePictureAlreadyHoldingTheIndex(t *testing.T) {
 func TestStoreOp6MarksTheCurrentPictureLongTermInsteadOfShortTerm(t *testing.T) {
 	b := &dpb{maxNumRefs: 4, maxFrameNum: 16}
 	pic := frame.NewPicture(1, 1)
-	hdr := &syntax.SliceHeader{
+	hdr := &sliceHeader{
 		NalRefIDC:             1,
 		FrameNum:              7,
 		AdaptiveRefPicMarking: true,
-		MMCOs:                 []syntax.MMCO{{Op: 6, LongTermFrameIdx: 2}},
+		MMCOs:                 []mmco{{Op: 6, LongTermFrameIdx: 2}},
 	}
 
 	b.store(pic, hdr)
@@ -567,14 +567,14 @@ func TestStoreOp6SurvivesTheSlidingWindowThatWouldHaveDroppedAShortTermPicture(t
 	b := &dpb{maxNumRefs: 2, maxFrameNum: 16}
 
 	longTermPic := frame.NewPicture(1, 1)
-	hdr := &syntax.SliceHeader{
+	hdr := &sliceHeader{
 		NalRefIDC: 1, FrameNum: 0, AdaptiveRefPicMarking: true,
-		MMCOs: []syntax.MMCO{{Op: 6, LongTermFrameIdx: 0}},
+		MMCOs: []mmco{{Op: 6, LongTermFrameIdx: 0}},
 	}
 	b.store(longTermPic, hdr)
 
 	for _, fn := range []uint32{1, 2, 3} {
-		b.store(frame.NewPicture(1, 1), &syntax.SliceHeader{NalRefIDC: 1, FrameNum: fn})
+		b.store(frame.NewPicture(1, 1), &sliceHeader{NalRefIDC: 1, FrameNum: fn})
 	}
 
 	if len(b.refs) != 2 {
@@ -653,7 +653,7 @@ func TestSlidingWindowTerminatesWithOnlyLongTermLeft(t *testing.T) {
 func TestStoreNonReferenceIsNotStored(t *testing.T) {
 	b := &dpb{maxNumRefs: 4, maxFrameNum: 16}
 	pic := frame.NewPicture(1, 1)
-	hdr := &syntax.SliceHeader{NalRefIDC: 0, FrameNum: 3}
+	hdr := &sliceHeader{NalRefIDC: 0, FrameNum: 3}
 
 	b.store(pic, hdr)
 
@@ -665,7 +665,7 @@ func TestStoreNonReferenceIsNotStored(t *testing.T) {
 func TestStoreIDRClearsBufferAndMarksLongTerm(t *testing.T) {
 	b := &dpb{maxNumRefs: 4, maxFrameNum: 16, refs: []*refFrame{newRef(1, false, 0), newRef(2, true, 0)}}
 	pic := frame.NewPicture(1, 1)
-	hdr := &syntax.SliceHeader{IDR: true, NalRefIDC: 1, FrameNum: 0, LongTermReference: true}
+	hdr := &sliceHeader{IDR: true, NalRefIDC: 1, FrameNum: 0, LongTermReference: true}
 
 	b.store(pic, hdr)
 
@@ -773,7 +773,7 @@ func TestBuildListsBAppliesEachListsModifications(t *testing.T) {
 
 	hdr := newTestHeader(6, false, 1)
 	hdr.ModificationL1Present = true
-	hdr.RefPicListModificationL1 = []syntax.RefPicListModification{{IDC: 0, Value: 4}}
+	hdr.RefPicListModificationL1 = []refListMod{{IDC: 0, Value: 4}}
 
 	_, l1 := b.buildListsB(hdr, 6, 2, 2)
 	assertPicOrder(t, "list 1", l1, []*refFrame{past, future})

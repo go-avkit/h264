@@ -1,27 +1,28 @@
 package decoder
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 
+	h264 "github.com/go-avkit/h264"
 	"github.com/go-avkit/h264/internal/bits"
 	"github.com/go-avkit/h264/internal/frame"
 	"github.com/go-avkit/h264/internal/level"
 	"github.com/go-avkit/h264/internal/loopfilter"
 	"github.com/go-avkit/h264/internal/nal"
-	"github.com/go-avkit/h264/internal/syntax"
 )
 
 type Decoder struct {
-	spsMap map[uint32]*syntax.SPS
-	ppsMap map[uint32]*syntax.PPS
+	spsMap map[uint32]*h264.SPS
+	ppsMap map[uint32]*h264.PPS
 
 	scanner *nal.Scanner
 	grid    *mbGrid
 	cur     *frame.Picture
-	sps     *syntax.SPS
+	sps     *h264.SPS
 	buffer  *dpb
-	lastHdr *syntax.SliceHeader
+	lastHdr *sliceHeader
 
 	pending    []*frame.Picture
 	maxReorder int
@@ -34,8 +35,8 @@ type Decoder struct {
 	motionFree   []*frame.Motion
 
 	scal    *scalingTables
-	scalSPS *syntax.SPS
-	scalPPS *syntax.PPS
+	scalSPS *h264.SPS
+	scalPPS *h264.PPS
 
 	sliceCount int
 	limits     Limits
@@ -49,8 +50,8 @@ type Limits struct {
 
 func New() *Decoder {
 	return &Decoder{
-		spsMap:  make(map[uint32]*syntax.SPS),
-		ppsMap:  make(map[uint32]*syntax.PPS),
+		spsMap:  make(map[uint32]*h264.SPS),
+		ppsMap:  make(map[uint32]*h264.PPS),
 		scanner: nal.NewScanner(),
 	}
 }
@@ -59,9 +60,9 @@ func (d *Decoder) SetLimits(l Limits) { d.limits = l }
 
 func (d *Decoder) Limits() Limits { return d.limits }
 
-func (d *Decoder) SPS(id uint32) *syntax.SPS { return d.spsMap[id] }
+func (d *Decoder) SPS(id uint32) *h264.SPS { return d.spsMap[id] }
 
-func (d *Decoder) PPS(id uint32) *syntax.PPS { return d.ppsMap[id] }
+func (d *Decoder) PPS(id uint32) *h264.PPS { return d.ppsMap[id] }
 
 // SetRecycle lets the decoder reuse the planes of a picture it has returned,
 // from the next call to Decode or Flush on: the pictures of one call are valid
@@ -276,12 +277,14 @@ func (d *Decoder) handleUnit(ebsp []byte) ([]*frame.Picture, error) {
 	if err != nil {
 		return nil, err
 	}
+	unit := h264.Unit{Type: h264.UnitType(u.Type), RefIDC: u.RefIDC, Payload: ebsp[1:]}
 	switch u.Type {
 	case nal.TypeSPS:
-		sps, err := syntax.ParseSPS(u.RBSP)
+		s, err := h264.ParseSPS(unit)
 		if err != nil {
-			return nil, err
+			return nil, refusal(err)
 		}
+		sps := &s
 		if err := d.checkSupported(sps); err != nil {
 			return nil, err
 		}
@@ -292,10 +295,26 @@ func (d *Decoder) handleUnit(ebsp []byte) ([]*frame.Picture, error) {
 		return nil, nil
 
 	case nal.TypePPS:
-		pps, err := syntax.ParsePPS(u.RBSP, d.SPS)
+		id, spsID, err := h264.PPSIDs(unit)
 		if err != nil {
-			return nil, err
+			return nil, refusal(err)
 		}
+		// A set may arrive before the sequence set it names; what it needs of that
+		// one (the bit depth to bound its quantiser, the chroma format to count its
+		// scaling lists) is assumed 8-bit 4:2:0 until a set is there, and a picture
+		// set that states scaling lists cannot be read without it.
+		ref := h264.SPS{ChromaFormat: 1, BitDepthLuma: 8, BitDepthChroma: 8}
+		if s := d.spsMap[spsID]; s != nil {
+			ref = *s
+		}
+		p, err := h264.ParsePPS(unit, ref)
+		if err != nil {
+			return nil, refusal(err)
+		}
+		if p.ScalingPresent && d.spsMap[spsID] == nil {
+			return nil, fmt.Errorf("%w: picture parameter set %d states scaling lists and its sequence set %d is absent", ErrNoParameters, id, spsID)
+		}
+		pps := &p
 		if old, ok := d.ppsMap[pps.ID]; ok && reflect.DeepEqual(old, pps) {
 			return nil, nil
 		}
@@ -303,22 +322,33 @@ func (d *Decoder) handleUnit(ebsp []byte) ([]*frame.Picture, error) {
 		return nil, nil
 
 	case nal.TypeSliceIDR, nal.TypeSliceNonIDR:
-		return d.decodeSlice(u)
+		return d.decodeSlice(u, unit)
 	}
 	return nil, nil
 }
 
-func (d *Decoder) checkSupported(sps *syntax.SPS) error {
-	if sps.ChromaArrayType() != syntax.Chroma420 {
-		return fmt.Errorf("%w: chroma format %d", ErrUnsupported, sps.ChromaFormatIDC)
+// refusal says what the decoder says of a parameter set or a header the reader
+// of the syntax refused: a feature it does not follow is ErrUnsupported, and
+// anything else is returned as it came.
+func refusal(err error) error {
+	switch {
+	case errors.Is(err, h264.ErrUnsupportedSPS), errors.Is(err, h264.ErrUnsupportedPPS), errors.Is(err, h264.ErrSliceGroups):
+		return fmt.Errorf("%w: %w", ErrUnsupported, err)
 	}
-	if sps.BitDepthLumaMinus8 != 0 || sps.BitDepthChromaMinus8 != 0 {
+	return err
+}
+
+func (d *Decoder) checkSupported(sps *h264.SPS) error {
+	if sps.ChromaArrayType() != 1 {
+		return fmt.Errorf("%w: chroma format %d", ErrUnsupported, sps.ChromaFormat)
+	}
+	if sps.BitDepthLuma != 8 || sps.BitDepthChroma != 8 {
 		return fmt.Errorf("%w: bit depth above 8", ErrUnsupported)
 	}
-	if !sps.FrameMbsOnly {
+	if !sps.FrameMBSOnly {
 		return fmt.Errorf("%w: field or MBAFF coding", ErrUnsupported)
 	}
-	if sps.QpprimeYZeroTransformBypass {
+	if sps.TransformBypass {
 		return fmt.Errorf("%w: lossless transform bypass", ErrUnsupported)
 	}
 	if err := level.CheckCeiling(sps); err != nil {
@@ -330,7 +360,7 @@ func (d *Decoder) checkSupported(sps *syntax.SPS) error {
 		}
 	}
 	if d.limits.MaxFrameMBs > 0 {
-		if n := sps.PicWidthInMbs() * sps.FrameHeightInMbs(); n > d.limits.MaxFrameMBs {
+		if n := int(sps.MBWidth * sps.MBHeight); n > d.limits.MaxFrameMBs {
 			return fmt.Errorf("%w: %d macroblocks per frame, the caller allows %d",
 				ErrOverLimit, n, d.limits.MaxFrameMBs)
 		}
@@ -338,7 +368,7 @@ func (d *Decoder) checkSupported(sps *syntax.SPS) error {
 	return nil
 }
 
-func (d *Decoder) scalingFor(sps *syntax.SPS, pps *syntax.PPS) *scalingTables {
+func (d *Decoder) scalingFor(sps *h264.SPS, pps *h264.PPS) *scalingTables {
 	if d.scalSPS == sps && d.scalPPS == pps && d.scal != nil {
 		return d.scal
 	}
@@ -348,10 +378,26 @@ func (d *Decoder) scalingFor(sps *syntax.SPS, pps *syntax.PPS) *scalingTables {
 	return d.scal
 }
 
-func (d *Decoder) decodeSlice(u nal.Unit) ([]*frame.Picture, error) {
-	r := bits.NewReader(u.RBSP)
-	hdr, sps, pps, err := syntax.ParseSliceHeader(r, u.Header, d)
+func (d *Decoder) decodeSlice(u nal.Unit, unit h264.Unit) ([]*frame.Picture, error) {
+	id, err := h264.SlicePPSID(unit)
 	if err != nil {
+		return nil, refusal(err)
+	}
+	pps := d.ppsMap[id]
+	if pps == nil {
+		return nil, fmt.Errorf("%w: picture parameter set %d", ErrNoParameters, id)
+	}
+	sps := d.spsMap[pps.SPSID]
+	if sps == nil {
+		return nil, fmt.Errorf("%w: sequence parameter set %d", ErrNoParameters, pps.SPSID)
+	}
+	h, ref, err := h264.ParseSliceReferences(unit, *sps, *pps)
+	if err != nil {
+		return nil, refusal(err)
+	}
+	hdr := newSliceHeader(h, ref)
+	r := bits.NewReader(u.RBSP)
+	if err := r.Seek(hdr.DataBit); err != nil {
 		return nil, err
 	}
 	weighted := pps.WeightedPred && (hdr.SliceType.IsP() || hdr.SliceType.IsSP())
@@ -369,13 +415,13 @@ func (d *Decoder) decodeSlice(u nal.Unit) ([]*frame.Picture, error) {
 			d.buffer.refs = d.buffer.refs[:0]
 		}
 		d.sps = sps
-		d.cur = d.newPicture(sps.PicWidthInMbs(), sps.FrameHeightInMbs())
+		d.cur = d.newPicture(int(sps.MBWidth), int(sps.MBHeight))
 		d.cur.FrameNum = hdr.FrameNum
 		d.cur.IDR = hdr.IDR
-		d.cur.CropWidth = sps.CroppedWidth()
-		d.cur.CropHeight = sps.CroppedHeight()
+		d.cur.CropWidth = int(sps.Width)
+		d.cur.CropHeight = int(sps.Height)
 		d.cur.POC = d.buffer.computePOC(sps, hdr)
-		d.grid = d.freshGrid(sps.PicWidthInMbs(), sps.FrameHeightInMbs())
+		d.grid = d.freshGrid(int(sps.MBWidth), int(sps.MBHeight))
 		d.sliceCount = 0
 	}
 	if d.cur == nil {
@@ -385,8 +431,8 @@ func (d *Decoder) decodeSlice(u nal.Unit) ([]*frame.Picture, error) {
 	d.lastHdr = hdr
 
 	d.buffer.updatePicNums(hdr.FrameNum)
-	active := hdr.NumRefIdxL0Active(pps)
-	activeL1 := hdr.NumRefIdxL1Active(pps)
+	active := hdr.NumRefIdxL0Active()
+	activeL1 := hdr.NumRefIdxL1Active()
 	var refList, refListL1 []*frame.Picture
 	switch {
 	case hdr.SliceType.IsP() || hdr.SliceType.IsSP():
@@ -414,7 +460,7 @@ func (d *Decoder) decodeSlice(u nal.Unit) ([]*frame.Picture, error) {
 		numRefIdxL1:     activeL1,
 		scal:            d.scalingFor(sps, pps),
 		directSpatial:   hdr.DirectSpatialMvPred,
-		direct8x8:       sps.Direct8x8Inference,
+		direct8x8:       sps.Direct8x8,
 		sliceID:         d.sliceCount,
 	}
 	if len(refListL1) != 0 {

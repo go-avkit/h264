@@ -12,7 +12,7 @@ func flatTables(t *testing.T) *scalingTables {
 	t.Helper()
 	sps := &syntax.SPS{ProfileIDC: syntax.ProfileHigh, ChromaFormatIDC: syntax.Chroma420}
 	pps := &syntax.PPS{Transform8x8Mode: true}
-	s := buildScalingTables(sps, pps)
+	s := buildScalingTables(rootSPS(sps), rootPPS(pps))
 	if !s.flat {
 		t.Fatal("a parameter set without scaling matrices must resolve to flat weights")
 	}
@@ -115,7 +115,7 @@ func TestRasterOrderConversionsAreInverses(t *testing.T) {
 func TestDefaultScalingMatricesReachDequantisation(t *testing.T) {
 	sps := &syntax.SPS{ProfileIDC: syntax.ProfileHigh, ChromaFormatIDC: syntax.Chroma420}
 	pps := &syntax.PPS{Transform8x8Mode: true, PicScalingMatrixPresent: true}
-	s := buildScalingTables(sps, pps)
+	s := buildScalingTables(rootSPS(sps), rootPPS(pps))
 	if s.flat {
 		t.Fatal("a picture scaling matrix with no lists present falls back to the JVT defaults, which are not flat")
 	}

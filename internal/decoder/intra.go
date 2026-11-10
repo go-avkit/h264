@@ -3,10 +3,10 @@ package decoder
 import (
 	"fmt"
 
+	h264 "github.com/go-avkit/h264"
 	"github.com/go-avkit/h264/internal/cavlc"
 	"github.com/go-avkit/h264/internal/loopfilter"
 	"github.com/go-avkit/h264/internal/pred"
-	"github.com/go-avkit/h264/internal/syntax"
 	"github.com/go-avkit/h264/internal/transform"
 )
 
@@ -344,9 +344,9 @@ func (d *sliceDecoder) addChromaResidual(res *mbResidual) {
 	}
 	baseX, baseY := d.mbx*8, d.mby*8
 	planes := [2][]byte{d.pic.Cb, d.pic.Cr}
-	offsets := [2]int32{d.pps.ChromaQPIndexOffset, d.pps.SecondChromaQPIndexOffset}
+	offsets := [2]int32{d.pps.ChromaQPIndexOffset, d.pps.SecondChromaQPOffset}
 	for plane := 0; plane < 2; plane++ {
-		qpc := syntax.ChromaQP(d.qpY, int(offsets[plane]))
+		qpc := h264.ChromaQP(d.qpY, int(offsets[plane]))
 		scale := d.scal.chroma4x4(d.cur.Intra, plane)
 		dequantChromaDC(&res.chromaDC[plane], qpc, scale)
 		for blk := 0; blk < 4; blk++ {
@@ -418,7 +418,7 @@ func (d *sliceDecoder) decodeIntraMB(info mbTypeInfo, res *mbResidual) error {
 		return d.decodeIPCM()
 
 	case mbTypeINxN:
-		if d.pps.Transform8x8Mode {
+		if d.pps.Transform8x8 {
 			flag, err := d.r.ReadFlag()
 			if err != nil {
 				return err

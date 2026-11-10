@@ -105,7 +105,7 @@ func TestCheckSupportedRejections(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			sps := base()
 			c.mod(sps)
-			err := d.checkSupported(sps)
+			err := d.checkSupported(rootSPS(sps))
 			if !errors.Is(err, ErrUnsupported) {
 				t.Fatalf("checkSupported() = %v, want ErrUnsupported", err)
 			}
@@ -113,7 +113,7 @@ func TestCheckSupportedRejections(t *testing.T) {
 	}
 
 	t.Run("fully supported SPS passes", func(t *testing.T) {
-		if err := d.checkSupported(base()); err != nil {
+		if err := d.checkSupported(rootSPS(base())); err != nil {
 			t.Fatalf("checkSupported() = %v, want nil", err)
 		}
 	})
@@ -122,10 +122,10 @@ func TestCheckSupportedRejections(t *testing.T) {
 		sps := base()
 		sps.ProfileIDC = syntax.ProfileHigh
 		sps.SeqScalingMatrixPresent = true
-		if err := d.checkSupported(sps); err != nil {
+		if err := d.checkSupported(rootSPS(sps)); err != nil {
 			t.Fatalf("checkSupported() = %v, want nil", err)
 		}
-		tables := buildScalingTables(sps, &syntax.PPS{Transform8x8Mode: true})
+		tables := buildScalingTables(rootSPS(sps), rootPPS(&syntax.PPS{Transform8x8Mode: true}))
 		if tables.flat {
 			t.Fatal("a sequence scaling matrix must reach dequantisation as non-flat weights")
 		}
@@ -170,8 +170,8 @@ func TestDecodeSliceReferencingAbsentPPS(t *testing.T) {
 
 	d := New()
 	_, err := decodeWithFlush(d, data)
-	if !errors.Is(err, syntax.ErrMissingPPS) {
-		t.Fatalf("Decode() = %v, want syntax.ErrMissingPPS", err)
+	if !errors.Is(err, ErrNoParameters) {
+		t.Fatalf("Decode() = %v, want ErrNoParameters", err)
 	}
 }
 
@@ -251,7 +251,7 @@ func TestDecodeSlicePicScalingMatrixIsAccepted(t *testing.T) {
 	if errors.Is(err, ErrUnsupported) {
 		t.Fatalf("Decode() = %v, want picture scaling matrices to be understood", err)
 	}
-	tables := buildScalingTables(sps, d.PPS(pps.ID))
+	tables := buildScalingTables(rootSPS(sps), d.PPS(pps.ID))
 	if tables.flat {
 		t.Fatal("a picture scaling matrix must reach dequantisation as non-flat weights")
 	}
