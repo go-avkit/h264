@@ -277,7 +277,9 @@ func (d *Decoder) handleUnit(ebsp []byte) ([]*frame.Picture, error) {
 	if err != nil {
 		return nil, err
 	}
-	unit := h264.Unit{Type: h264.UnitType(u.Type), RefIDC: u.RefIDC, Payload: ebsp[1:]}
+	// The escaping was undone once, by nal.Parse; the readers of the root package
+	// take that copy instead of making their own.
+	unit := h264.Unit{Type: h264.UnitType(u.Type), RefIDC: u.RefIDC, Payload: ebsp[1:], Unescaped: u.RBSP}
 	switch u.Type {
 	case nal.TypeSPS:
 		s, err := h264.ParseSPS(unit)

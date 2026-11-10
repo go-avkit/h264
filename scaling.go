@@ -241,9 +241,15 @@ func (s SPS) ResolvedScaling() (l4 [6][16]uint8, l8 [6][64]uint8) {
 }
 
 // ResolvedScaling is the same for a picture set, which falls back on the sequence
-// set's resolved lists when it states none of its own and, for a list it omits,
-// on the sequence set's list of that kind (fall-back rule B) or on the defaults
-// (rule A) when the sequence set states no matrix.
+// set's resolved lists when it states none of its own.
+//
+// For a list it omits (pic_scaling_list_present_flag 0), H.264 (V16) 7.4.2.2 says
+// rule set A of Table 7-2 applies when seq_scaling_matrix_present_flag is 0 and
+// rule set B when it is 1. Per the table, in set A the first list of each kind
+// (indices 0, 3, 6, 7) falls back to its Default_* list, and in set B to the
+// "sequence-level scaling list" of the SAME index: index 6 (Sl_8x8_Intra_Y) is
+// our 8x8 list 0 and index 7 (Sl_8x8_Inter_Y) our 8x8 list 1. The other lists
+// fall back to the list before (set A and B alike).
 func (p PPS) ResolvedScaling(sps SPS) (l4 [6][16]uint8, l8 [6][64]uint8) {
 	seq := highProfiles[sps.Profile] && sps.ScalingPresent
 	var s4 [6][16]uint8

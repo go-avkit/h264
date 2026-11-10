@@ -488,3 +488,28 @@ func TestASetThatCannotBeAPictureIsRefused(t *testing.T) {
 		t.Errorf("1024 macroblocks across: %v", err)
 	}
 }
+
+// TestAPictureSetOmittingEightByEightListsFallsBackPerTable72 holds the fall-back
+// of H.264 (V16) Table 7-2 for the two 8x8 lists of a 4:2:0 picture set: scaling
+// list index 6 (Sl_8x8_Intra_Y) and 7 (Sl_8x8_Inter_Y) take rule set A's
+// Default_8x8_Intra / Default_8x8_Inter when the sequence set states no matrix,
+// and rule set B's sequence-level list of the SAME index when it does.
+//
+// go.264 took index 3 of the sequence lists for list 7 under rule B. At 4:2:0 that
+// is a flat list, so a picture set that omitted 8x8 list 7 beside a sequence set
+// that stated one was decoded with a flat inter 8x8 matrix.
+func TestAPictureSetOmittingEightByEightListsFallsBackPerTable72(t *testing.T) {
+	p := PPS{ScalingPresent: true, Transform8x8: true} // states no list of its own
+	sps := SPS{Profile: 100, ChromaFormat: 1, ScalingPresent: true}
+	sps.Scaling.Present8x8[0], sps.Scaling.List8x8[0] = true, filled8(21)
+	sps.Scaling.Present8x8[1], sps.Scaling.List8x8[1] = true, filled8(34)
+
+	_, a := p.ResolvedScaling(SPS{Profile: 100, ChromaFormat: 1}) // rule set A
+	if a[0] != defaultScan8x8Intra || a[1] != defaultScan8x8Inter {
+		t.Error("rule set A: the 8x8 lists are not the defaults")
+	}
+	_, b := p.ResolvedScaling(sps) // rule set B
+	if b[0] != filled8(21) || b[1] != filled8(34) {
+		t.Errorf("rule set B: lists %d and %d, want the sequence-level 21 and 34", b[0][0], b[1][0])
+	}
+}
