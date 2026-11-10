@@ -149,7 +149,7 @@ func (s SPS) MaxNumReorder() int {
 // reader that took the branch anyway would be misaligned for the whole set.
 var highProfiles = map[uint8]bool{
 	100: true, 110: true, 122: true, 244: true, 44: true, 83: true,
-	86: true, 118: true, 128: true, 138: true, 139: true, 144: true,
+	86: true, 118: true, 128: true, 138: true, 139: true, 134: true, 135: true, 144: true,
 }
 
 // ParseSPS reads a sequence parameter set from a NAL unit.

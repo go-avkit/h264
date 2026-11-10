@@ -82,3 +82,188 @@ func readScalingList(r *sticky, list []uint8) (useDefault bool) {
 	}
 	return useDefault
 }
+
+// zigzag4x4 and zigzag8x8 map the order scaling lists are sent in (zig-zag) to
+// raster position, Table 8-12 for frame macroblocks.
+var zigzag4x4 = [16]uint8{
+	0, 1, 4, 8, 5, 2, 3, 6,
+	9, 12, 13, 10, 7, 11, 14, 15,
+}
+
+var zigzag8x8 = [64]uint8{
+	0, 1, 8, 16, 9, 2, 3, 10,
+	17, 24, 32, 25, 18, 11, 4, 5,
+	12, 19, 26, 33, 40, 48, 41, 34,
+	27, 20, 13, 6, 7, 14, 21, 28,
+	35, 42, 49, 56, 57, 50, 43, 36,
+	29, 22, 15, 23, 30, 37, 44, 51,
+	58, 59, 52, 45, 38, 31, 39, 46,
+	53, 60, 61, 54, 47, 55, 62, 63,
+}
+
+// The default lists of Tables 7-3 and 7-4, as the tables print them (raster).
+var (
+	defaultRaster4x4Intra = [16]uint8{
+		6, 13, 20, 28,
+		13, 20, 28, 32,
+		20, 28, 32, 37,
+		28, 32, 37, 42,
+	}
+	defaultRaster4x4Inter = [16]uint8{
+		10, 14, 20, 24,
+		14, 20, 24, 27,
+		20, 24, 27, 30,
+		24, 27, 30, 34,
+	}
+	defaultRaster8x8Intra = [64]uint8{
+		6, 10, 13, 16, 18, 23, 25, 27,
+		10, 11, 16, 18, 23, 25, 27, 29,
+		13, 16, 18, 23, 25, 27, 29, 31,
+		16, 18, 23, 25, 27, 29, 31, 33,
+		18, 23, 25, 27, 29, 31, 33, 36,
+		23, 25, 27, 29, 31, 33, 36, 38,
+		25, 27, 29, 31, 33, 36, 38, 40,
+		27, 29, 31, 33, 36, 38, 40, 42,
+	}
+	defaultRaster8x8Inter = [64]uint8{
+		9, 13, 15, 17, 19, 21, 22, 24,
+		13, 13, 17, 19, 21, 22, 24, 25,
+		15, 17, 19, 21, 22, 24, 25, 27,
+		17, 19, 21, 22, 24, 25, 27, 28,
+		19, 21, 22, 24, 25, 27, 28, 30,
+		21, 22, 24, 25, 27, 28, 30, 32,
+		22, 24, 25, 27, 28, 30, 32, 33,
+		24, 25, 27, 28, 30, 32, 33, 35,
+	}
+)
+
+// scan4x4 and scan8x8 put a raster list in the order it would be sent, zig-zag.
+func scan4x4(raster [16]uint8) (out [16]uint8) {
+	for i, p := range zigzag4x4 {
+		out[i] = raster[p]
+	}
+	return out
+}
+
+func scan8x8(raster [64]uint8) (out [64]uint8) {
+	for i, p := range zigzag8x8 {
+		out[i] = raster[p]
+	}
+	return out
+}
+
+var (
+	defaultScan4x4Intra = scan4x4(defaultRaster4x4Intra)
+	defaultScan4x4Inter = scan4x4(defaultRaster4x4Inter)
+	defaultScan8x8Intra = scan8x8(defaultRaster8x8Intra)
+	defaultScan8x8Inter = scan8x8(defaultRaster8x8Inter)
+)
+
+// flat is what "no matrix" means: every coefficient weighs 16 (Flat_4x4_16).
+func flatLists() (l4 [6][16]uint8, l8 [6][64]uint8) {
+	for i := range l4 {
+		for j := range l4[i] {
+			l4[i][j] = 16
+		}
+	}
+	for i := range l8 {
+		for j := range l8[i] {
+			l8[i][j] = 16
+		}
+	}
+	return l4, l8
+}
+
+// resolve applies Table 7-2: a list that is stated and says "default" is the
+// default list, one that is stated is itself, and one that is not falls back to
+// the list before it (to fallbackIntra / fallbackInter for the first of each
+// kind, which differ between the sequence set and the picture set).
+func (l ScalingLists) resolve(n8 int, fb4Intra, fb4Inter [16]uint8, fb8Intra, fb8Inter [64]uint8) (l4 [6][16]uint8, l8 [6][64]uint8) {
+	for i := 0; i < 6; i++ {
+		switch {
+		case l.Present4x4[i] && l.UseDefault4x4[i]:
+			l4[i] = defaultScan4x4Intra
+			if i >= 3 {
+				l4[i] = defaultScan4x4Inter
+			}
+		case l.Present4x4[i]:
+			l4[i] = l.List4x4[i]
+		case i == 0:
+			l4[0] = fb4Intra
+		case i == 3:
+			l4[3] = fb4Inter
+		default:
+			l4[i] = l4[i-1]
+		}
+	}
+	for i := 0; i < n8; i++ {
+		switch {
+		case l.Present8x8[i] && l.UseDefault8x8[i]:
+			l8[i] = defaultScan8x8Intra
+			if i%2 == 1 {
+				l8[i] = defaultScan8x8Inter
+			}
+		case l.Present8x8[i]:
+			l8[i] = l.List8x8[i]
+		case i == 0:
+			l8[0] = fb8Intra
+		case i == 1:
+			l8[1] = fb8Inter
+		default:
+			l8[i] = l8[i-2]
+		}
+	}
+	_, flat8 := flatLists()
+	for i := n8; i < 6; i++ {
+		l8[i] = flat8[i]
+	}
+	return l4, l8
+}
+
+// eightByEight is how many 8x8 lists the chroma format has: two, or six at full
+// chroma resolution.
+func eightByEight(sps SPS) int {
+	if sps.ChromaFormat == 3 {
+		return 6
+	}
+	return 2
+}
+
+// ResolvedScaling are the six 4x4 and six 8x8 scaling lists the sequence set
+// leaves in force, in the order they were sent (zig-zag), with Table 7-2's
+// fall-back applied (Table 7-3 and 7-4's defaults, or the list before). A set
+// that states no matrix, and a profile that cannot, gives the flat lists.
+func (s SPS) ResolvedScaling() (l4 [6][16]uint8, l8 [6][64]uint8) {
+	if !highProfiles[s.Profile] || !s.ScalingPresent {
+		return flatLists()
+	}
+	return s.Scaling.resolve(eightByEight(s), defaultScan4x4Intra, defaultScan4x4Inter, defaultScan8x8Intra, defaultScan8x8Inter)
+}
+
+// ResolvedScaling is the same for a picture set, which falls back on the sequence
+// set's resolved lists when it states none of its own and, for a list it omits,
+// on the sequence set's list of that kind (fall-back rule B) or on the defaults
+// (rule A) when the sequence set states no matrix.
+func (p PPS) ResolvedScaling(sps SPS) (l4 [6][16]uint8, l8 [6][64]uint8) {
+	seq := highProfiles[sps.Profile] && sps.ScalingPresent
+	var s4 [6][16]uint8
+	var s8 [6][64]uint8
+	if seq {
+		s4, s8 = sps.ResolvedScaling()
+	}
+	if !p.ScalingPresent {
+		if seq {
+			return s4, s8
+		}
+		return flatLists()
+	}
+	fb4Intra, fb4Inter, fb8Intra, fb8Inter := defaultScan4x4Intra, defaultScan4x4Inter, defaultScan8x8Intra, defaultScan8x8Inter
+	if seq {
+		fb4Intra, fb4Inter, fb8Intra, fb8Inter = s4[0], s4[3], s8[0], s8[1]
+	}
+	n8 := 0
+	if p.Transform8x8 {
+		n8 = eightByEight(sps)
+	}
+	return p.Scaling.resolve(n8, fb4Intra, fb4Inter, fb8Intra, fb8Inter)
+}
