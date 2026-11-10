@@ -178,3 +178,4 @@ jobs:
           go-version: '1.27.3'
       - run: go test -run='^$' -fuzz='^FuzzDecode$' -fuzztime=60s ./decoder
       - run: go test -run='^$' -fuzz='^FuzzStream$' -fuzztime=30s .
+      - run: go test -run='^$' -fuzz='^FuzzParameterSets$' -fuzztime=30s .

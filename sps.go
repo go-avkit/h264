@@ -47,6 +47,101 @@ type SPS struct {
 	POCType         uint32
 	Log2MaxPOCLSB   uint8
 	POCAlwaysZero   bool
+
+	// What picture order count type 1 derives from (8.2.1.2): the offsets, and the
+	// cycle of per-reference-frame offsets, at most 255 of them.
+	OffsetForNonRefPic        int32
+	OffsetForTopToBottomField int32
+	OffsetForRefFrame         []int32
+
+	// ConstraintFlags is the byte after profile_idc: constraint_set0..5_flag and the
+	// two reserved bits, constraint_set0 being the top bit.
+	ConstraintFlags uint8
+	// GapsAllowed is gaps_in_frame_num_value_allowed_flag.
+	GapsAllowed bool
+	// MBAdaptive is mb_adaptive_frame_field_flag, stated only when frames are not
+	// the only coding.
+	MBAdaptive bool
+	// Direct8x8 is direct_8x8_inference_flag.
+	Direct8x8 bool
+	// TransformBypass is qpprime_y_zero_transform_bypass_flag.
+	TransformBypass bool
+	// ScalingPresent is seq_scaling_matrix_present_flag; Scaling are the lists it
+	// states (7.3.2.1.1.1), those it does not state left as not Present.
+	ScalingPresent bool
+	Scaling        ScalingLists
+	// VUIPresent is vui_parameters_present_flag, and VUI what it carries.
+	VUIPresent bool
+	VUI        VUI
+}
+
+// ChromaArrayType is the chroma format as the decoding process sees it: 0 when the
+// colour planes are coded separately, whatever the stated format.
+func (s SPS) ChromaArrayType() uint8 { return chromaArrayType(s) }
+
+// IsLevel1b reports level 1b, which is stated as level_idc 9 or, outside the high
+// profiles, as level 1.1 with constraint_set3_flag.
+func (s SPS) IsLevel1b() bool {
+	if s.Level == 9 {
+		return true
+	}
+	return !highProfiles[s.Profile] && s.Level == 11 && s.ConstraintFlags&0x10 != 0
+}
+
+// maxDpbMbs is MaxDpbMbs of table A-1 for the stated level; an unknown level gets
+// the largest, which is the value that refuses nothing.
+func (s SPS) maxDpbMbs() uint32 {
+	if s.IsLevel1b() {
+		return 396
+	}
+	switch s.Level {
+	case 10:
+		return 396
+	case 11:
+		return 900
+	case 12, 13, 20:
+		return 2376
+	case 21:
+		return 4752
+	case 22, 30:
+		return 8100
+	case 31:
+		return 18000
+	case 32:
+		return 20480
+	case 40, 41:
+		return 32768
+	case 42:
+		return 34816
+	case 50:
+		return 110400
+	case 51, 52:
+		return 184320
+	}
+	return 696320
+}
+
+// maxBufferedFrames is the most frames any level lets a decoder hold.
+const maxBufferedFrames = 16
+
+// MaxDpbFrames is how many frames the level lets the decoded picture buffer hold
+// at this picture size, 1 to 16 (A.3.1, item h).
+func (s SPS) MaxDpbFrames() int {
+	mbs := s.MBWidth * s.MBHeight
+	if mbs == 0 {
+		return 1
+	}
+	return int(min(max(s.maxDpbMbs()/mbs, 1), maxBufferedFrames))
+}
+
+// MaxNumReorder is how many pictures can precede another in decoding order and
+// follow it in output order: max_num_reorder_frames when the VUI states it, the
+// whole buffer when it does not.
+func (s SPS) MaxNumReorder() int {
+	if s.VUIPresent && s.VUI.BitstreamRestriction {
+		return int(min(s.VUI.MaxNumReorderFrames, maxBufferedFrames))
+	}
+	return s.MaxDpbFrames()
 }
 
 // highProfiles are the profile_idc values that carry a chroma format, bit depths
@@ -70,10 +165,11 @@ func ParseSPS(u Unit) (SPS, error) {
 	var s SPS
 
 	s.Profile = uint8(r.bits(8))
-	// Six constraint flags and two bits the format reserves. Nothing here reads
-	// them, but they are spent: skipping the wrong number of bits is the
-	// classic way to report a plausible size for a picture nobody encoded.
-	r.bits(8)
+	// Six constraint flags and two bits the format reserves. They are kept
+	// (level 1b is told by one of them) and, before that, spent: skipping the
+	// wrong number of bits is the classic way to report a plausible size for a
+	// picture nobody encoded.
+	s.ConstraintFlags = uint8(r.bits(8))
 	s.Level = uint8(r.bits(8))
 	s.ID = r.ue()
 
@@ -96,34 +192,38 @@ func ParseSPS(u Unit) (SPS, error) {
 		return s, err
 	}
 	s.MaxNumRefFrames = r.ue()
-	r.bit() // gaps_in_frame_num_value_allowed_flag
+	s.GapsAllowed = r.flag()
 
 	s.MBWidth = r.ue() + 1
 	mapUnits := r.ue() + 1
 	s.FrameMBSOnly = r.flag()
 	if !s.FrameMBSOnly {
-		r.bit() // mb_adaptive_frame_field_flag
+		s.MBAdaptive = r.flag()
 		// A map unit is a field pair when frames are not the only coding, so the
 		// picture is twice as tall in macroblocks as the set states.
 		s.MBHeight = mapUnits * 2
 	} else {
 		s.MBHeight = mapUnits
 	}
-	r.bit() // direct_8x8_inference_flag
+	s.Direct8x8 = r.flag()
 
 	if r.flag() { // frame_cropping_flag
 		s.CropLeft, s.CropRight = r.ue(), r.ue()
 		s.CropTop, s.CropBottom = r.ue(), r.ue()
 	}
-	// vui_parameters_present_flag and everything after it is left unread: the
-	// size is settled by here, and the VUI is a long optional structure whose
-	// misreading could only harm what is already known.
-
 	if r.err != nil {
 		return s, r.err
 	}
 	s.size()
-	return s, nil
+
+	// ⛔ The size is settled by here, so a VUI that is malformed does not take it
+	// away: the set is returned with the error, as a high profile's is, and a caller
+	// that wants the size alone may use it. The VUI is last, so nothing read after it
+	// can be misaligned by it.
+	if s.VUIPresent = r.flag(); s.VUIPresent {
+		s.VUI = readVUI(r)
+	}
+	return s, r.err
 }
 
 // readHighProfile reads the chroma format, the bit depths and the scaling
@@ -145,46 +245,20 @@ func (s *SPS) readHighProfile(r *sticky) error {
 		return err
 	}
 	s.BitDepthLuma, s.BitDepthChroma = bdY+8, bdC+8
-	r.bit() // qpprime_y_zero_transform_bypass_flag
-	if r.flag() {
+	s.TransformBypass = r.flag()
+	if s.ScalingPresent = r.flag(); s.ScalingPresent {
 		// ⛔ The scaling matrices are the one variable-length part of an SPS, and
 		// the reason a reader that skips them by a fixed amount reports a
 		// plausible and wrong picture size. Six lists of sixteen, then two of
 		// sixty-four -- or six of sixty-four when the chroma planes are coded at
 		// full resolution.
-		eights := 2
+		count := 8
 		if s.ChromaFormat == 3 {
-			eights = 6
+			count = 12
 		}
-		for i := 0; i < 6; i++ {
-			skipScalingList(r, 16)
-		}
-		for i := 0; i < eights; i++ {
-			skipScalingList(r, 64)
-		}
+		s.Scaling = readScalingLists(r, count)
 	}
 	return nil
-}
-
-// skipScalingList consumes one scaling list of n coefficients.
-//
-// ⛔ It reads deltas only while the running value is non-zero: a delta that
-// brings it to zero means "use the default list from here", and NOTHING further
-// is stated for that list. Reading n deltas regardless would swallow the bits of
-// whatever comes next, and reading none would leave them behind -- both leave the
-// reader misaligned with no error to show for it.
-func skipScalingList(r *sticky, n int) {
-	if !r.flag() { // this list is not present
-		return
-	}
-	last, next := 8, 8
-	for j := 0; j < n && next != 0; j++ {
-		delta := r.se()
-		next = (last + int(delta) + 256) % 256
-		if next != 0 {
-			last = next
-		}
-	}
 }
 
 // readPicOrderCnt reads the picture order count fields, whose shape depends on
@@ -200,8 +274,8 @@ func (s *SPS) readPicOrderCnt(r *sticky) error {
 		s.Log2MaxPOCLSB = n + 4
 	case 1:
 		s.POCAlwaysZero = r.flag()
-		r.se() // offset_for_non_ref_pic
-		r.se() // offset_for_top_to_bottom_field
+		s.OffsetForNonRefPic = r.se()
+		s.OffsetForTopToBottomField = r.se()
 		// ⛔ A count of offsets follows, each one signed. This is the second
 		// variable-length part of an SPS, and it is bounded: 255 is the most the
 		// format allows, and a larger count read out of a misaligned stream
@@ -210,8 +284,9 @@ func (s *SPS) readPicOrderCnt(r *sticky) error {
 		if n > 255 {
 			return fmt.Errorf("%w: %d offsets in the picture order cycle, at most 255", ErrUnsupportedSPS, n)
 		}
-		for i := uint32(0); i < n; i++ {
-			r.se()
+		s.OffsetForRefFrame = make([]int32, n)
+		for i := range s.OffsetForRefFrame {
+			s.OffsetForRefFrame[i] = r.se()
 		}
 	case 2:
 		// Nothing more is stated.
