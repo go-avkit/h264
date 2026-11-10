@@ -199,3 +199,14 @@ func TestAStreamOfNothingButSeparatorsHoldsNoUnit(t *testing.T) {
 		t.Errorf("err = %v, want bitstream.ErrNoStartCode", err)
 	}
 }
+
+func TestAnUnescapedPayloadSuppliedByTheCallerIsUsedAsItIs(t *testing.T) {
+	u := Unit{Type: UnitSPS, Payload: []byte{0, 0, 3, 1}}
+	if got := u.Unescape(); len(got) != 3 || got[2] != 1 {
+		t.Fatalf("Unescape = %v", got)
+	}
+	u.Unescaped = []byte{9, 9}
+	if got := u.Unescape(); len(got) != 2 || got[0] != 9 {
+		t.Fatalf("with Unescaped set: %v", got)
+	}
+}

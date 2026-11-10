@@ -36,6 +36,11 @@ type Unit struct {
 	Type    UnitType
 	RefIDC  uint8 // nal_ref_idc: how much a unit matters to what follows
 	Payload []byte
+	// Unescaped, when a caller already holds the payload with the escaping undone,
+	// is what Unescape returns instead of making another copy. It must be exactly
+	// what Unescape would have made; a decoder that reads the header and then the
+	// macroblock data from one buffer sets it once and pays for one pass.
+	Unescaped []byte
 }
 
 // SplitAnnexB finds the NAL units of a byte stream, the form a .264 file and an
@@ -82,8 +87,14 @@ func units(raw [][]byte) ([]Unit, error) {
 	return out, nil
 }
 
-// Unescape undoes the escaping inside this unit's payload.
-func (u Unit) Unescape() []byte { return bitstream.Unescape(u.Payload) }
+// Unescape undoes the escaping inside this unit's payload, or returns Unescaped
+// when the caller supplied it.
+func (u Unit) Unescape() []byte {
+	if u.Unescaped != nil {
+		return u.Unescaped
+	}
+	return bitstream.Unescape(u.Payload)
+}
 
 // sticky reads fields in a straight line, keeping the first error.
 //
