@@ -43,6 +43,13 @@ func NewPicture(widthMBs, heightMBs int) *Picture {
 	return p
 }
 
+// Recycle makes a picture whose planes are being reused look like a new one:
+// every field but the planes and their geometry returns to its zero value.
+func (p *Picture) Recycle() {
+	p.CropWidth, p.CropHeight = p.Width, p.Height
+	p.POC, p.FrameNum, p.IDR, p.LongTerm, p.Motion = 0, 0, false, false, nil
+}
+
 func (p *Picture) OriginY() int { return LumaMargin*p.StrideY + LumaMargin }
 
 func (p *Picture) OriginC() int { return ChromaMargin*p.StrideC + ChromaMargin }

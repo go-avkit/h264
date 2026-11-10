@@ -26,6 +26,10 @@ type Decoder struct {
 	pending    []*frame.Picture
 	maxReorder int
 
+	recycle   bool
+	delivered []*frame.Picture
+	pool      []*frame.Picture
+
 	motionOwners []*frame.Picture
 	motionFree   []*frame.Motion
 
@@ -59,7 +63,88 @@ func (d *Decoder) SPS(id uint32) *syntax.SPS { return d.spsMap[id] }
 
 func (d *Decoder) PPS(id uint32) *syntax.PPS { return d.ppsMap[id] }
 
+// SetRecycle lets the decoder reuse the planes of a picture it has returned,
+// from the next call to Decode or Flush on: the pictures of one call are valid
+// until the next. A caller that keeps pictures longer must leave it off, which
+// is the default; each picture is then a fresh allocation.
+func (d *Decoder) SetRecycle(on bool) {
+	d.recycle = on
+	if !on {
+		d.delivered, d.pool = nil, nil
+	}
+}
+
+// release takes back the pictures returned by earlier calls that are no longer
+// a reference, so that newPicture can hand their planes out again. A picture
+// still in the reference set, or still waiting for its turn to be output, is
+// not touched.
+func (d *Decoder) release() {
+	if !d.recycle {
+		return
+	}
+	keep := d.delivered[:0]
+	for _, p := range d.delivered {
+		held := false
+		if d.buffer != nil {
+			for _, r := range d.buffer.refs {
+				if r.pic == p {
+					held = true
+					break
+				}
+			}
+		}
+		if held {
+			keep = append(keep, p)
+			continue
+		}
+		if len(d.pool) < maxPooledPictures {
+			d.pool = append(d.pool, p)
+		}
+	}
+	clear(d.delivered[len(keep):])
+	d.delivered = keep
+}
+
+// maxPooledPictures bounds the free list: a stream never needs more than its
+// reference frames and the pictures held for reordering, 16 and 16 at most.
+const maxPooledPictures = 34
+
+// newPicture returns a picture of the given size in macroblocks: a recycled
+// one when a free one has that geometry, else a new allocation. A recycled
+// picture keeps the samples of its previous life; every macroblock of a
+// picture is written before the picture is output, and a macroblock a corrupt
+// stream never states is whatever was there, not zero.
+func (d *Decoder) newPicture(widthMBs, heightMBs int) *frame.Picture {
+	for len(d.pool) > 0 {
+		p := d.pool[len(d.pool)-1]
+		d.pool = d.pool[:len(d.pool)-1]
+		if p.Width == widthMBs*16 && p.Height == heightMBs*16 {
+			p.Recycle()
+			return p
+		}
+	}
+	return frame.NewPicture(widthMBs, heightMBs)
+}
+
 func (d *Decoder) Decode(data []byte) ([]*frame.Picture, error) {
+	d.release()
+	out, err := d.decode(data)
+	if d.recycle {
+		d.delivered = append(d.delivered, out...)
+	}
+	return out, err
+}
+
+func (d *Decoder) Flush() ([]*frame.Picture, error) {
+	d.release()
+	out, err := d.flush()
+	if d.recycle {
+		d.delivered = append(d.delivered, out...)
+	}
+	return out, err
+}
+
+func (d *Decoder) decode(data []byte) ([]*frame.Picture, error) {
 	d.scanner.Append(data)
 	var out []*frame.Picture
 	for {
@@ -80,7 +165,7 @@ func (d *Decoder) Decode(data []byte) ([]*frame.Picture, error) {
 	return out, nil
 }
 
-func (d *Decoder) Flush() ([]*frame.Picture, error) {
+func (d *Decoder) flush() ([]*frame.Picture, error) {
 	var out []*frame.Picture
 	if unit, ok := d.scanner.Flush(); ok {
 		pics, err := d.handleUnit(unit)
@@ -284,7 +369,7 @@ func (d *Decoder) decodeSlice(u nal.Unit) ([]*frame.Picture, error) {
 			d.buffer.refs = d.buffer.refs[:0]
 		}
 		d.sps = sps
-		d.cur = frame.NewPicture(sps.PicWidthInMbs(), sps.FrameHeightInMbs())
+		d.cur = d.newPicture(sps.PicWidthInMbs(), sps.FrameHeightInMbs())
 		d.cur.FrameNum = hdr.FrameNum
 		d.cur.IDR = hdr.IDR
 		d.cur.CropWidth = sps.CroppedWidth()

@@ -25,9 +25,11 @@ var (
 // field means no limit.
 type Limits = decoder.Limits
 
-// Frame is one decoded picture. Its planes alias the decoder's storage and
-// stay valid for as long as the caller holds them: the decoder never writes
-// to a picture after returning it.
+// Frame is one decoded picture. Its planes alias the decoder's storage, and
+// they are valid until the next call to Decode or Flush on the same Decoder:
+// the decoder reuses the storage of a picture that is no longer a reference
+// for a later one. A caller that keeps a picture longer copies it first
+// (AppendI420 does).
 type Frame struct {
 	Y       []byte
 	Cb      []byte
@@ -83,6 +85,7 @@ type Decoder struct {
 func New(limits Limits) *Decoder {
 	d := decoder.New()
 	d.SetLimits(limits)
+	d.SetRecycle(true)
 	return &Decoder{d: d}
 }
 
