@@ -43,11 +43,15 @@ jobs:
       - run: go version
       - run: go vet ./...
       - run: go build ./...
+      # The header and derivation layer (the root package) is held to 100%. The
+      # decoder under decoder/ and internal/ is imported from go.264 and is held
+      # by its tests, the conformance vectors and the fuzzers below instead.
+      - name: Test the decoder
+        run: go test -race ./decoder/... ./internal/...
       - name: Test + 100% coverage gate
         shell: bash
         run: |
-          COVERPKG=$(go list ./... | paste -sd, -)
-          go test -race -coverpkg="$COVERPKG" -coverprofile=cover.out ./...
+          go test -race -coverpkg=github.com/go-avkit/h264 -coverprofile=cover.out .
           go tool cover -func=cover.out | tail -n 25
           cov=$(go tool cover -func=cover.out | tail -1 | awk '{print $3}' | tr -d '%')
           echo "coverage: ${cov}%"
@@ -139,3 +143,35 @@ jobs:
           # indistinguishable from a green tick.
           echo "running ${{ matrix.goarch }} under $q"
           GOARCH=${{ matrix.goarch }} go test -exec="$q" ./...
+
+  # The decoder against ITU-T H.264.1: every picture of every stream the
+  # manifests of testdata/jvt name must match ffmpeg's framemd5, bit for bit.
+  # H264_JVT_REQUIRE=1 makes a stream that failed to download a failure, not a skip.
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+      - name: Fetch the JVT streams
+        working-directory: tools
+        run: go run ./jvtfetch --dir "$RUNNER_TEMP/jvt" --manifests ../testdata/jvt
+      - name: Decode them
+        env:
+          H264_JVT_DIR: ${{ runner.temp }}/jvt
+          H264_JVT_REQUIRE: '1'
+        run: go test -count=1 -v -run '^TestJVTConformance$' ./decoder
+
+  # The decoder and the header reader take hostile input: no byte string may
+  # panic or hang them. The corpus is committed (testdata/fuzzseed,
+  # testdata/conformance, testdata/fuzz); a finding is written to testdata/fuzz.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+      - run: go test -run='^$' -fuzz='^FuzzDecode$' -fuzztime=60s ./decoder
+      - run: go test -run='^$' -fuzz='^FuzzStream$' -fuzztime=30s .

@@ -16,18 +16,60 @@ for _, u := range units {
 }
 ```
 
-## What it is not
+## The decoder
+
+`github.com/go-avkit/h264/decoder` turns an Annex B stream into pictures, in
+display order: CABAC and CAVLC, Baseline, Main and High (8x8 transform, scaling
+matrices), progressive, 8-bit 4:2:0, pure Go, no assembly required. Field and
+MBAFF coding, lossless transform bypass, higher bit depths and other chroma
+formats are refused with `ErrUnsupported`.
+
+```go
+d := decoder.New(decoder.Limits{MaxFrameMBs: 1 << 17})
+frames, err := d.Decode(annexB)      // any chunking; pictures come out as they are ready
+rest, err := d.Flush()
+i420 := frames[0].AppendI420(nil)
+```
+
+The root package (parsers and derivations, 100 % covered) and the decoder are two
+layers of one module. The decoder was **imported from
+[`oops1/go.264`](https://github.com/oops1/go.264) v1.12.0 (commit `3373a3f`)**,
+by Valery Chukalin, whose BSD 2-Clause licence is kept in `LICENSE-go.264`; the
+encoder and the hardware back ends of that project are not part of this import.
+Its own header parsers (`internal/syntax`) are still there, next to the ones in
+the root package, until the two are unified.
+
+**Verified** against ITU-T H.264.1: `TestJVTConformance` compares every picture of
+the 73 streams in `testdata/jvt` with ffmpeg's `framemd5`, bit for bit. 67
+match; `MR2_TANDBERG_E`, `MR3_TANDBERG_B`, `MR4_TANDBERG_C` and `MR5_TANDBERG_C`
+need MMCO 5 and frame-number gaps, which go.264 v1.12.0 does not handle
+([oops1/go.264#2](https://github.com/oops1/go.264/pull/2)), and the test fails
+if one of them starts to pass without being taken off its list. CI downloads the
+streams (`tools/jvtfetch`) and runs them, then fuzzes `decoder.Decoder` and the
+header reader; the corpus is in `testdata/`.
+
+**Speed**, decode only, one core, 1280x720 x264 GOP 60, the IDR and the 45
+pictures after it (what a poster frame at 1.5 s into a GOP costs), Apple M4 Max:
+
+| | time |
+|---|---|
+| this decoder, as imported | 249 to 259 ms |
+| `ffmpeg -threads 1 -ss 5.5 -i clip -frames:v 1` (process start and exit included, about 30 ms) | 88 ms |
+
+It is slower than ffmpeg, which is an open defect
+([go-avkit/decode#10](https://github.com/go-avkit/decode/issues/10)); the
+profile is in the issue and the work follows.
+
+## What the root package is not
 
 **It does not decode pictures.** There is no entropy decoding, no residual, no
-transform, no motion compensation and no deblocking here — nothing in this
-module turns a bitstream into pixels. It answers the questions a decoder has to
-answer *before* it can: which pictures are references, in what order a slice
-addresses them, what each picture's order count is, and how two predictions are
-weighted.
+transform, no motion compensation and no deblocking in it — it answers the
+questions a decoder has to answer *before* it can: which pictures are references,
+in what order a slice addresses them, what each picture's order count is, and how
+two predictions are weighted. The decoder above is the other layer.
 
-For pixels, compose it with a decoder. [`oops1/go.264`](https://github.com/oops1/go.264)
-is a pure-Go H.264 decoder and the two agree on **785 reference lists across 18
-streams** and on **all 65536 implicit-weight pairs** — see below.
+The two agree on **785 reference lists across 18 streams** and on **all 65536
+implicit-weight pairs** — see below.
 
 ## What is in it
 
@@ -145,4 +187,6 @@ this project — as a decoding defect it was not.
 
 ## Licence
 
-BSD-3-Clause.
+BSD-3-Clause. The decoder (`decoder/` and `internal/` except where a file says
+otherwise) is BSD-2-Clause, Copyright (c) 2026 Valery Chukalin, from
+`oops1/go.264`: see `LICENSE-go.264`.
