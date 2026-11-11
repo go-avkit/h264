@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
       - name: gofmt
         run: |
           unformatted=$(gofmt -l .)
@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
       - run: go version
       - run: go vet ./...
       - run: go build ./...
@@ -78,7 +78,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
       - run: go env GOARCH && go test ./...
 
   # The one 32-bit target. 386 runs natively on the amd64 runner, without qemu,
@@ -94,7 +94,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.4'
       - run: GOARCH=386 go vet ./...
       - run: GOARCH=386 go test ./...
 
@@ -113,7 +113,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
       # ⛔ `qemu-user-static` is a VIRTUAL package on Ubuntu 26.04, which
       # `ubuntu-latest` became on 2026-10-19, and apt refuses to choose between its
       # two providers:
@@ -156,7 +156,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
       - name: Fetch the JVT streams
         working-directory: tools
         run: go run ./jvtfetch --dir "$RUNNER_TEMP/jvt" --manifests ../testdata/jvt
@@ -175,7 +175,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.27.3'
+          go-version: '1.27.4'
       - run: go test -run='^$' -fuzz='^FuzzDecode$' -fuzztime=60s ./decoder
       - run: go test -run='^$' -fuzz='^FuzzStream$' -fuzztime=30s .
       - run: go test -run='^$' -fuzz='^FuzzParameterSets$' -fuzztime=30s .
