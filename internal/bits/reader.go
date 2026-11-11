@@ -33,6 +33,10 @@ func (r *Reader) Reset(data []byte) {
 
 func (r *Reader) BitPos() int { return r.pos }
 
+// Data is the buffer the reader reads, for a consumer that reads it by itself and
+// puts the position back with Seek (the arithmetic decoder).
+func (r *Reader) Data() []byte { return r.data }
+
 func (r *Reader) BitsLeft() int { return r.end - r.pos }
 
 func (r *Reader) ByteAligned() bool { return r.pos&7 == 0 }
