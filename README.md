@@ -1,5 +1,11 @@
 # h264
 
+[![ci](https://github.com/go-avkit/h264/actions/workflows/ci.yml/badge.svg)](https://github.com/go-avkit/h264/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/go-avkit/h264.svg)](https://pkg.go.dev/github.com/go-avkit/h264)
+[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD--3--Clause-blue.svg)](LICENSE)
+
+Part of [go-avkit](https://go-avkit.github.io): [documentation](https://go-avkit.github.io/docs/).
+
 Pure-Go (CGO=0) reader for the H.264/AVC bitstream, and the **derivations clause
 8.2 defines on top of it**: picture order counts, the reference picture set, the
 reference lists a slice predicts from, and the weights a bi-predicted block is
