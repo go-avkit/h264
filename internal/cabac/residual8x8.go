@@ -40,24 +40,31 @@ func (d *Decoder) ResidualBlock8x8(coeffs *[64]int32) int {
 	for i := range coeffs {
 		coeffs[i] = 0
 	}
-	var significant [64]bool
-	numCoeff := 64
-	for i := 0; i < numCoeff-1; i++ {
+	// The significant positions are collected in order as the map is decoded, so
+	// the levels are read from the list (last to first) instead of scanning a flag
+	// array of 64 entries for the few that are set.
+	var pos [64]uint8
+	n := 0
+	last := false
+	for i := 0; i < 63; i++ {
 		if d.DecodeDecision(offSignificant8x8+int(significantCoeffFlagOffset8x8[i])) == 1 {
-			significant[i] = true
+			pos[n] = uint8(i)
+			n++
 			if d.DecodeDecision(offLastSignificant8x8+int(lastCoeffFlagOffset8x8[i])) == 1 {
-				numCoeff = i + 1
+				last = true
+				break
 			}
 		}
 	}
-	significant[numCoeff-1] = true
+	if !last { // the last coefficient is significant without being coded (7.3.5.3.3)
+		pos[n] = 63
+		n++
+	}
 
 	numGt1, numEq1 := 0, 0
 	total := 0
-	for i := numCoeff - 1; i >= 0; i-- {
-		if !significant[i] {
-			continue
-		}
+	for k := n - 1; k >= 0; k-- {
+		i := pos[k]
 		level := d.boundedLevel(d.absLevelMinus1At(offAbsLevel8x8, 4, numGt1, numEq1) + 1)
 		if level > 1 {
 			numGt1++
