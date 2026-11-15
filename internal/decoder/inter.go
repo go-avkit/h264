@@ -441,7 +441,29 @@ func sameMotion(m *mbState, a, b int) bool {
 		m.MvL1[a] == m.MvL1[b] && m.refIdxL1[a] == m.refIdxL1[b]
 }
 
+// motionSegments merges the 4x4 blocks of a macroblock that share their motion
+// into rectangles. A macroblock whose sixteen blocks share one motion (P_Skip,
+// the 16x16 partitions, most of the macroblocks of a picture) is one segment: it
+// is tested first, with no used-block bookkeeping.
 func motionSegments(m *mbState, dst []motionSegment) []motionSegment {
+	uniform := true
+	for b := 1; b < 16; b++ {
+		if !sameMotion(m, 0, b) {
+			uniform = false
+			break
+		}
+	}
+	if uniform {
+		return append(dst[:0], motionSegment{
+			w: 16, h: 16,
+			mv:  [2][2]int16{m.MvL0[0], m.MvL1[0]},
+			ref: [2]int8{m.refIdxL0[0], m.refIdxL1[0]},
+		})
+	}
+	return motionSegmentsMerged(m, dst)
+}
+
+func motionSegmentsMerged(m *mbState, dst []motionSegment) []motionSegment {
 	segs := dst[:0]
 	var used [16]bool
 	for by := 0; by < 16; by += 4 {
