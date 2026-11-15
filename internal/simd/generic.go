@@ -1,5 +1,7 @@
 package simd
 
+import "encoding/binary"
+
 func absInt(v int) int {
 	if v < 0 {
 		return -v
@@ -307,10 +309,23 @@ func avgBytesGeneric(dst []byte, dstStride, dstOff int, a []byte, aStride, aOff 
 		out := dst[do : do+w]
 		ra := a[ao : ao+w]
 		rb := b[bo : bo+w]
-		for x := range out {
+		x := 0
+		for ; x+8 <= w; x += 8 {
+			binary.LittleEndian.PutUint64(out[x:], avg8(binary.LittleEndian.Uint64(ra[x:]), binary.LittleEndian.Uint64(rb[x:])))
+		}
+		for ; x < w; x++ {
 			out[x] = byte((int(ra[x]) + int(rb[x]) + 1) >> 1)
 		}
 	}
+}
+
+// avg8 is (a + b + 1) >> 1 in each of the eight byte lanes of a and b:
+// (a + b + 1) >> 1 = (a | b) - ((a ^ b) >> 1), and the lane-wise (a ^ b) >> 1
+// is the whole-word shift with the bit that crossed into the lane masked off.
+// A lane of a | b is never below the same lane of the term subtracted, so
+// nothing borrows between lanes.
+func avg8(a, b uint64) uint64 {
+	return (a | b) - ((a^b)>>1)&0x7f7f7f7f7f7f7f7f
 }
 
 func AvgBytes(dst []byte, dstStride, dstOff int, a []byte, aStride, aOff int, b []byte, bStride, bOff, w, h int) {
@@ -321,7 +336,19 @@ func copyBlockGeneric(dst []byte, dstStride, dstOff int, src []byte, srcStride, 
 	for y := 0; y < h; y++ {
 		do := dstOff + y*dstStride
 		so := srcOff + y*srcStride
-		copy(dst[do:do+w], src[so:so+w])
+		// The widths H.264 predicts are 16, 8 and 4 (and 2 for chroma): a
+		// fixed-size array move is a few wide loads and stores, where copy
+		// is a call to memmove for every row.
+		switch w {
+		case 16:
+			*(*[16]byte)(dst[do : do+16]) = [16]byte(src[so : so+16])
+		case 8:
+			*(*[8]byte)(dst[do : do+8]) = [8]byte(src[so : so+8])
+		case 4:
+			*(*[4]byte)(dst[do : do+4]) = [4]byte(src[so : so+4])
+		default:
+			copy(dst[do:do+w], src[so:so+w])
+		}
 	}
 }
 
