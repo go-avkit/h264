@@ -87,6 +87,18 @@ time goes now: CABAC residual decoding (the `DecodeDecision` engine itself; a
 one-step renormalisation was measured and gave nothing), the remaining deblocking,
 and no NEON kernels on arm64.
 
+On amd64 with AVX2, luma prediction, weighted prediction and deblocking run the
+AVX2 kernels of [go-videodsp/kernels](https://github.com/go-videodsp/kernels)
+instead of the avo kernels of `internal/simd` (which remain for processors
+without AVX2). Whole decode, one core (`GOMAXPROCS=1`, pinned), Ryzen 9 7950X,
+1-minute load 0.5 to 1.0 (the single decode accounts for most of that),
+median of 7 interleaved rounds, 1080p clips, framemd5 identical to ffmpeg on
+all frames: alien (240 frames) 4.73 s to 4.44 s (6 % less), fade with explicit
+weights (120 frames) 2.12 s to 1.85 s (13 % less). Leaving one stage on the avo
+kernels costs, on alien / fade: luma prediction +0.20 / +0.09 s, weighted
+prediction +0.04 / +0.15 s, deblocking +0.04 / +0.04 s, so every stage is
+routed to the kernels.
+
 ## What the root package is not
 
 **It does not decode pictures.** There is no entropy decoding, no residual, no

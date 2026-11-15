@@ -52,4 +52,4 @@ func PredictLumaAvg(dst []byte, dstStride, dstOff int, src []byte, srcStride, sr
 }
 
 // FusedAverage reports whether PredictLumaAvg is a single fused pass.
-const FusedAverage = kernelsLuma
+var FusedAverage = kernelsLuma
