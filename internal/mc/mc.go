@@ -1,6 +1,16 @@
 package mc
 
-import "github.com/go-avkit/h264/internal/simd"
+import (
+	kmc "github.com/go-videodsp/kernels/mc"
+
+	"github.com/go-avkit/h264/internal/simd"
+)
+
+// weightsInRange reports whether the kernels take these weighting parameters:
+// logWD 0..7, weight -128..128, offset -128..127 (8-bit samples).
+func weightsInRange(logWD, weight, offset int) bool {
+	return logWD >= 0 && logWD <= 7 && weight >= -128 && weight <= 128 && offset >= -128 && offset <= 127
+}
 
 func clip1(v int) int {
 	if v < 0 {
@@ -155,6 +165,10 @@ func WeightUni(dst []byte, stride, off, w, h, weight, offset, logWD int) {
 	if offset == 0 && weight == 1<<uint(logWD) {
 		return
 	}
+	if kernelsLuma && kernelSize(w, h) && weightsInRange(logWD, weight, offset) {
+		kmc.WeightUni(dst, off, stride, w, h, weight, offset, logWD)
+		return
+	}
 	if logWD >= 1 {
 		round := 1 << uint(logWD-1)
 		sh := uint(logWD)
@@ -185,6 +199,14 @@ func WeightUni(dst []byte, stride, off, w, h, weight, offset, logWD int) {
 func WeightBi(dst []byte, dstStride, dstOff int, a []byte, aStride, aOff int, b []byte, bStride, bOff int, w, h, w0, w1, o0, o1, logWD int) {
 	if w0 == w1 && w0 == 1<<uint(logWD) && (o0+o1+1)>>1 == 0 {
 		Average(dst, dstStride, dstOff, a, aStride, aOff, b, bStride, bOff, w, h)
+		return
+	}
+	if kernelsLuma && kernelSize(w, h) && weightsInRange(logWD, w0, o0) && weightsInRange(logWD, w1, o1) && !shares(dst, b) {
+		// The kernel combines the second prediction into the first in place.
+		if &dst[dstOff] != &a[aOff] || dstStride != aStride {
+			simd.CopyBlock(dst, dstStride, dstOff, a, aStride, aOff, w, h)
+		}
+		kmc.WeightBi(dst, dstOff, dstStride, b, bOff, bStride, w, h, w0, w1, o0, o1, logWD)
 		return
 	}
 	round := 1 << uint(logWD)
