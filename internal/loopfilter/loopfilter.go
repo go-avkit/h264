@@ -181,6 +181,29 @@ func edgeStrengths(p, q *MB, pnz, qnz uint16, uni uint8, pr, qr, step int, mbEdg
 	return bs, any
 }
 
+// edgeParams holds the thresholds of one edge: the luma indexes (8-309,
+// 8-310 with qPav of 8-306) and, for each chroma plane, the same from the
+// chroma QPs. An edge inside a macroblock has p == q, so the four edges and
+// both directions share one set, computed once per macroblock.
+type edgeParams struct {
+	ia, ib   int
+	cia, cib [2]int
+}
+
+func newEdgeParams(p, q *MB) edgeParams {
+	var e edgeParams
+	qpAv := deblock.AverageQP(p.filterQPY(), q.filterQPY())
+	e.ia = deblock.IndexA(qpAv, q.AlphaOffset)
+	e.ib = deblock.IndexB(qpAv, q.BetaOffset)
+	for plane := 0; plane < 2; plane++ {
+		qpc := deblock.AverageQP(
+			h264.ChromaQP(p.filterQPY(), q.ChromaQPOffset[plane]),
+			h264.ChromaQP(q.filterQPY(), q.ChromaQPOffset[plane]))
+		e.cia[plane], e.cib[plane] = deblock.IndexA(qpc, q.AlphaOffset), deblock.IndexB(qpc, q.BetaOffset)
+	}
+	return e
+}
+
 type edgeContext struct {
 	at  func(mbx, mby int) *MB
 	pic *frame.Picture
@@ -229,6 +252,10 @@ func (c *edgeContext) filterMB(mbx, mby int) {
 		last = 1
 	}
 	cnz := nzMask(cur)
+	var in edgeParams
+	if last > 1 {
+		in = newEdgeParams(cur, cur)
+	}
 	var uni uint8
 	if !cur.Intra && last > 1 && step == 1 {
 		uni = quadUniform(cur)
@@ -241,10 +268,10 @@ func (c *edgeContext) filterMB(mbx, mby int) {
 		tnz = nzMask(top)
 	}
 	for e := 0; e < last; e += step {
-		c.verticalEdge(cur, left, mbx, mby, e, cnz, lnz, uni)
+		c.verticalEdge(cur, left, mbx, mby, e, cnz, lnz, uni, &in)
 	}
 	for e := 0; e < last; e += step {
-		c.horizontalEdge(cur, top, mbx, mby, e, cnz, tnz, uni)
+		c.horizontalEdge(cur, top, mbx, mby, e, cnz, tnz, uni, &in)
 	}
 }
 
@@ -272,7 +299,7 @@ func (m *MB) internalEdgesUnfiltered() bool {
 	return true
 }
 
-func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int, cnz, lnz uint16, uni uint8) {
+func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int, cnz, lnz uint16, uni uint8, in *edgeParams) {
 	p, pnz, pr := cur, cnz, e-1
 	mbEdge := e == 0
 	if mbEdge {
@@ -286,29 +313,23 @@ func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int, cnz, lnz uint
 	if !any {
 		return
 	}
-	qpAv := deblock.AverageQP(p.filterQPY(), cur.filterQPY())
-	ia := deblock.IndexA(qpAv, cur.AlphaOffset)
-	ib := deblock.IndexB(qpAv, cur.BetaOffset)
+	var ep edgeParams
+	if mbEdge {
+		ep = newEdgeParams(p, cur)
+	} else {
+		ep = *in
+	}
 	deblock.FilterLumaEdgeVertical(c.pic.Y, c.pic.StrideY,
-		c.pic.LumaOffset(mbx*16+x, mby*16), bs, ia, ib)
+		c.pic.LumaOffset(mbx*16+x, mby*16), bs, ep.ia, ep.ib)
 
 	if e != 0 && e != 2 {
 		return
 	}
-	cx := mbx*8 + e*2
-	offsets := cur.ChromaQPOffset
-	var cia, cib [2]int
-	for plane := 0; plane < 2; plane++ {
-		qpc := deblock.AverageQP(
-			h264.ChromaQP(p.filterQPY(), offsets[plane]),
-			h264.ChromaQP(cur.filterQPY(), offsets[plane]))
-		cia[plane], cib[plane] = deblock.IndexA(qpc, cur.AlphaOffset), deblock.IndexB(qpc, cur.BetaOffset)
-	}
 	deblock.FilterChromaPairVertical(c.pic.Cb, c.pic.Cr, c.pic.StrideC,
-		c.pic.ChromaOffset(cx, mby*8), bs, cia[0], cib[0], cia[1], cib[1])
+		c.pic.ChromaOffset(mbx*8+e*2, mby*8), bs, ep.cia[0], ep.cib[0], ep.cia[1], ep.cib[1])
 }
 
-func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int, cnz, tnz uint16, uni uint8) {
+func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int, cnz, tnz uint16, uni uint8, in *edgeParams) {
 	p, pnz, pr := cur, cnz, (e-1)*4
 	mbEdge := e == 0
 	if mbEdge {
@@ -322,23 +343,18 @@ func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int, cnz, tnz uin
 	if !any {
 		return
 	}
-	qpAv := deblock.AverageQP(p.filterQPY(), cur.filterQPY())
+	var ep edgeParams
+	if mbEdge {
+		ep = newEdgeParams(p, cur)
+	} else {
+		ep = *in
+	}
 	deblock.FilterLumaEdgeHorizontal(c.pic.Y, c.pic.StrideY,
-		c.pic.LumaOffset(mbx*16, mby*16+y), bs,
-		deblock.IndexA(qpAv, cur.AlphaOffset), deblock.IndexB(qpAv, cur.BetaOffset))
+		c.pic.LumaOffset(mbx*16, mby*16+y), bs, ep.ia, ep.ib)
 
 	if e != 0 && e != 2 {
 		return
 	}
-	cy := mby*8 + e*2
-	offsets := cur.ChromaQPOffset
-	var ia, ib [2]int
-	for plane := 0; plane < 2; plane++ {
-		qpc := deblock.AverageQP(
-			h264.ChromaQP(p.filterQPY(), offsets[plane]),
-			h264.ChromaQP(cur.filterQPY(), offsets[plane]))
-		ia[plane], ib[plane] = deblock.IndexA(qpc, cur.AlphaOffset), deblock.IndexB(qpc, cur.BetaOffset)
-	}
 	deblock.FilterChromaPairHorizontal(c.pic.Cb, c.pic.Cr, c.pic.StrideC,
-		c.pic.ChromaOffset(mbx*8, cy), bs, ia[0], ib[0], ia[1], ib[1])
+		c.pic.ChromaOffset(mbx*8, mby*8+e*2), bs, ep.cia[0], ep.cib[0], ep.cia[1], ep.cib[1])
 }
