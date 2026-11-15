@@ -88,3 +88,36 @@ func FilterChromaPairHorizontal(cb, cr []byte, stride, offset int, bS [4]uint8, 
 	FilterChromaEdgeHorizontal(cb, stride, offset, bS, indexACb, indexBCb)
 	FilterChromaEdgeHorizontal(cr, stride, offset, bS, indexACr, indexBCr)
 }
+
+// KernelsMB reports whether FilterMB is available: the build routes the edges
+// through go-videodsp/kernels.
+func KernelsMB() bool { return kernelsLF }
+
+// FilterMB filters one frame macroblock, 4:2:0, with lf.DeblockMB: the luma
+// vertical then horizontal edges and the same for Cb and Cr, in the order of
+// 8.7. Only valid where KernelsMB is true, and for strengths DeblockMB takes
+// (see MBStrengthsOK).
+func FilterMB(y []byte, yOff, yStride int, cb, cr []byte, cOff, cStride int, e *lf.MBEdges) {
+	lf.DeblockMB(y, yOff, yStride, cb, cr, cOff, cStride, e)
+}
+
+// MBStrengthsOK reports whether the strengths of e are in the form DeblockMB
+// accepts: per edge either no 4 at all, or, on edge 0, four 4s. Field and
+// MBAFF macroblocks can mix a 4 with lower values on one edge; those take the
+// per-edge path.
+func MBStrengthsOK(e *lf.MBEdges) bool {
+	for d := range e.BS {
+		for k, bs := range e.BS[d] {
+			n4 := 0
+			for _, s := range bs {
+				if s == 4 {
+					n4++
+				}
+			}
+			if n4 != 0 && (k != 0 || n4 != 4) {
+				return false
+			}
+		}
+	}
+	return true
+}

@@ -5,6 +5,7 @@ import (
 	"github.com/go-avkit/h264/internal/deblock"
 	"github.com/go-avkit/h264/internal/frame"
 	"github.com/go-avkit/h264/internal/parallel"
+	"github.com/go-videodsp/kernels/lf"
 )
 
 type MB struct {
@@ -95,6 +96,10 @@ func edgeStrength(p, q *MB, pBlk, qBlk int, mbEdge bool) uint8 {
 	return 0
 }
 
+// mbKernel routes a macroblock through one call of the kernels (a variable so
+// that a test can compare the two paths).
+var mbKernel = deblock.KernelsMB()
+
 type edgeContext struct {
 	at  func(mbx, mby int) *MB
 	pic *frame.Picture
@@ -141,6 +146,11 @@ func (c *edgeContext) filterMB(mbx, mby int) {
 	last := 4
 	if cur.internalEdgesUnfiltered() {
 		last = 1
+	}
+	// With the kernels the macroblock is filtered in one call; strengths the
+	// call does not take (a 4 beside other values) leave it to the per-edge path.
+	if mbKernel && c.filterMBKernel(cur, left, top, mbx, mby, step, last) {
+		return
 	}
 	for e := 0; e < last; e += step {
 		c.verticalEdge(cur, left, mbx, mby, e)
@@ -273,4 +283,76 @@ func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int) {
 	}
 	deblock.FilterChromaPairHorizontal(c.pic.Cb, c.pic.Cr, c.pic.StrideC,
 		c.pic.ChromaOffset(mbx*8, cy), bs, ia[0], ib[0], ia[1], ib[1])
+}
+
+// strengths is the four boundary strengths of edge e between p and q (8.7.2.1):
+// vertical or horizontal, mbEdge for the edge shared with the neighbour p.
+func strengths(p, q *MB, e int, vertical, mbEdge bool) (bs [4]uint8) {
+	for g := 0; g < 4; g++ {
+		var qBlk, pBlk int
+		switch {
+		case vertical && mbEdge:
+			qBlk, pBlk = BlkIdxAt(0, g*4), BlkIdxAt(12, g*4)
+		case vertical:
+			qBlk, pBlk = BlkIdxAt(e*4, g*4), BlkIdxAt(e*4-4, g*4)
+		case mbEdge:
+			qBlk, pBlk = BlkIdxAt(g*4, 0), BlkIdxAt(g*4, 12)
+		default:
+			qBlk, pBlk = BlkIdxAt(g*4, e*4), BlkIdxAt(g*4, e*4-4)
+		}
+		bs[g] = edgeStrength(p, q, pBlk, qBlk, mbEdge)
+	}
+	return bs
+}
+
+// thresholds are the luma and chroma indexes of an edge between p and q
+// (8-306 to 8-311, 8-454, 8-455).
+func thresholds(p, q *MB) (luma lf.Thresholds, chroma [2]lf.Thresholds) {
+	qpAv := deblock.AverageQP(p.filterQPY(), q.filterQPY())
+	luma = lf.Thresholds{IndexA: uint8(deblock.IndexA(qpAv, q.AlphaOffset)), IndexB: uint8(deblock.IndexB(qpAv, q.BetaOffset))}
+	for plane := 0; plane < 2; plane++ {
+		qpc := deblock.AverageQP(
+			h264.ChromaQP(p.filterQPY(), q.ChromaQPOffset[plane]),
+			h264.ChromaQP(q.filterQPY(), q.ChromaQPOffset[plane]))
+		chroma[plane] = lf.Thresholds{IndexA: uint8(deblock.IndexA(qpc, q.AlphaOffset)), IndexB: uint8(deblock.IndexB(qpc, q.BetaOffset))}
+	}
+	return luma, chroma
+}
+
+// filterMBKernel filters the macroblock with one call of the kernels and
+// reports whether it did.
+func (c *edgeContext) filterMBKernel(cur, left, top *MB, mbx, mby, step, last int) bool {
+	var e lf.MBEdges
+	for k := 0; k < last; k += step {
+		if k == 0 {
+			if left != nil {
+				e.BS[0][0] = strengths(left, cur, 0, true, true)
+			}
+			if top != nil {
+				e.BS[1][0] = strengths(top, cur, 0, false, true)
+			}
+			continue
+		}
+		e.BS[0][k] = strengths(cur, cur, k, true, false)
+		e.BS[1][k] = strengths(cur, cur, k, false, false)
+	}
+	if !deblock.MBStrengthsOK(&e) {
+		return false
+	}
+	inL, inC := thresholds(cur, cur)
+	leftL, leftC, topL, topC := inL, inC, inL, inC
+	if left != nil {
+		leftL, leftC = thresholds(left, cur)
+	}
+	if top != nil {
+		topL, topC = thresholds(top, cur)
+	}
+	e.Luma = [2][2]lf.Thresholds{{leftL, inL}, {topL, inL}}
+	for p := 0; p < 2; p++ {
+		e.Chroma[p] = [2][2]lf.Thresholds{{leftC[p], inC[p]}, {topC[p], inC[p]}}
+	}
+	pic := c.pic
+	deblock.FilterMB(pic.Y, pic.LumaOffset(mbx*16, mby*16), pic.StrideY,
+		pic.Cb, pic.Cr, pic.ChromaOffset(mbx*8, mby*8), pic.StrideC, &e)
+	return true
 }
