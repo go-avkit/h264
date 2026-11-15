@@ -25,7 +25,7 @@ func newRefEncoder(sliceQP int, intra bool, initIDC int) *refEncoder {
 	} else {
 		d.initContexts(contextInitPB[initIDC], sliceQP)
 	}
-	e.ctx = d.ctx
+	e.ctx = splitContexts(&d)
 	return e
 }
 

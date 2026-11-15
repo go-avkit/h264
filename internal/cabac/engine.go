@@ -38,7 +38,7 @@ type Decoder struct {
 	rng        uint32 // codIRange
 	bitsNeeded int    // -8..-1: shifts left before the next byte is due, minus eight
 	overflow   bool
-	ctx        [NumContexts]context
+	ctx        [NumContexts]uint8 // pStateIdx<<1 | valMPS: one byte per context, see merged.go
 }
 
 // lpsShift is the renormalisation shift after a least probable symbol, by
@@ -67,11 +67,9 @@ func (d *Decoder) initContexts(table *[1024][2]int8, sliceQPY int) {
 		n := int(table[i][1])
 		pre := clip3(1, 126, ((m*qp)>>4)+n)
 		if pre <= 63 {
-			d.ctx[i].state = uint8(63 - pre)
-			d.ctx[i].mps = 0
+			d.ctx[i] = uint8(63-pre) << 1
 		} else {
-			d.ctx[i].state = uint8(pre - 64)
-			d.ctx[i].mps = 1
+			d.ctx[i] = uint8(pre-64)<<1 | 1
 		}
 	}
 }
@@ -132,7 +130,7 @@ func (d *Decoder) consumeAlignmentBits(r *bits.Reader) error {
 }
 
 func (d *Decoder) State(ctxIdx int) (state, mps uint8) {
-	return d.ctx[ctxIdx].state, d.ctx[ctxIdx].mps
+	return d.ctx[ctxIdx] >> 1, d.ctx[ctxIdx] & 1
 }
 
 // Restart starts the arithmetic code afresh at the reader's position, which must be
@@ -158,38 +156,36 @@ func (d *Decoder) Restart(r *bits.Reader) error {
 
 // DecodeDecision is DecodeDecision of 9.3.3.2.1 and its RenormD.
 func (d *Decoder) DecodeDecision(ctxIdx int) uint32 {
-	c := &d.ctx[ctxIdx]
-	lps := uint32(rangeTabLPS[c.state][d.rng>>6&3])
+	s := d.ctx[ctxIdx]
+	lps := uint32(mergedLPS[s][d.rng>>6&3])
 	d.rng -= lps
 	scaled := d.rng << 7
 	if d.value < scaled {
-		bin := uint32(c.mps)
-		c.state = transIdxMPS[c.state]
-		if scaled < 256<<7 { // the range fell below 256: one doubling
-			d.rng = scaled >> 6
-			d.value <<= 1
-			d.bitsNeeded++
-			if d.bitsNeeded >= 0 {
-				d.fetch(0)
-				d.bitsNeeded = -8
-			}
+		d.ctx[ctxIdx] = mergedNextMPS[s]
+		// codIRange is below 512: the range fell below 256 exactly when bit 8 is
+		// clear, and then one doubling restores it. Written without a branch
+		// (the unpredictable one of the engine); the refill below fires once
+		// per eight shifts and is predictable.
+		sh := uint(^d.rng>>8) & 1
+		d.rng <<= sh
+		d.value <<= sh
+		d.bitsNeeded += int(sh)
+		if d.bitsNeeded >= 0 {
+			d.fetch(0)
+			d.bitsNeeded = -8
 		}
-		return bin
+		return uint32(s & 1)
 	}
-	n := int(lpsShift[lps>>3])
-	d.value = (d.value - scaled) << uint(n)
-	d.rng = lps << uint(n)
-	bin := uint32(1 - c.mps)
-	if c.state == 0 {
-		c.mps = 1 - c.mps
-	}
-	c.state = transIdxLPS[c.state]
-	d.bitsNeeded += n
+	n := uint(lpsShift[lps>>3])
+	d.value = (d.value - scaled) << n
+	d.rng = lps << n
+	d.ctx[ctxIdx] = mergedNextLPS[s]
+	d.bitsNeeded += int(n)
 	if d.bitsNeeded >= 0 {
 		d.fetch(d.bitsNeeded)
 		d.bitsNeeded -= 8
 	}
-	return bin
+	return uint32(s&1) ^ 1
 }
 
 // DecodeBypass is DecodeBypass of 9.3.3.2.3.
