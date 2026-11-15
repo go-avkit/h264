@@ -31,33 +31,28 @@ func dct8x1D(src [8]int32) [8]int32 {
 	return out
 }
 
-func idct8x1D(src [8]int32) [8]int32 {
-	a0 := src[0] + src[4]
-	a2 := src[0] - src[4]
-	a4 := (src[2] >> 1) - src[6]
-	a6 := (src[6] >> 1) + src[2]
+// idct8 is the one-dimensional inverse transform of 8.5.13 on eight values (the
+// same equations for the rows and for the columns), taking and returning the
+// values in registers: passing them as [8]int32 copied the array in and out of
+// every call and was the larger part of its cost.
+func idct8(s0, s1, s2, s3, s4, s5, s6, s7 int32) (o0, o1, o2, o3, o4, o5, o6, o7 int32) {
+	a0 := s0 + s4
+	a2 := s0 - s4
+	a4 := (s2 >> 1) - s6
+	a6 := (s6 >> 1) + s2
 	b0 := a0 + a6
 	b2 := a2 + a4
 	b4 := a2 - a4
 	b6 := a0 - a6
-	a1 := -src[3] + src[5] - src[7] - (src[7] >> 1)
-	a3 := src[1] + src[7] - src[3] - (src[3] >> 1)
-	a5 := -src[1] + src[7] + src[5] + (src[5] >> 1)
-	a7 := src[3] + src[5] + src[1] + (src[1] >> 1)
+	a1 := -s3 + s5 - s7 - (s7 >> 1)
+	a3 := s1 + s7 - s3 - (s3 >> 1)
+	a5 := -s1 + s7 + s5 + (s5 >> 1)
+	a7 := s3 + s5 + s1 + (s1 >> 1)
 	b1 := (a7 >> 2) + a1
 	b3 := a3 + (a5 >> 2)
 	b5 := (a3 >> 2) - a5
 	b7 := a7 - (a1 >> 2)
-	var out [8]int32
-	out[0] = b0 + b7
-	out[1] = b2 + b5
-	out[2] = b4 + b3
-	out[3] = b6 + b1
-	out[4] = b6 - b1
-	out[5] = b4 - b3
-	out[6] = b2 - b5
-	out[7] = b0 - b7
-	return out
+	return b0 + b7, b2 + b5, b4 + b3, b6 + b1, b6 - b1, b4 - b3, b2 - b5, b0 - b7
 }
 
 func Forward8x8(b *Block8x8) {
@@ -84,28 +79,41 @@ func Forward8x8(b *Block8x8) {
 	}
 }
 
+// Inverse8x8 is the inverse 8x8 transform of 8.5.13 with the final
+// (x + 32) >> 6 (Equation 8-406). Two exact shortcuts for the sparse blocks that
+// dominate real streams:
+//
+//   - only the DC coefficient is non-zero: every butterfly of the row pass
+//     returns d00 and every one of the column pass again, so each of the 64
+//     samples is (d00 + 32) >> 6;
+//   - a row that is all zero transforms to a zero row (the transform is linear
+//     and idct8 of zeros is zeros), so the row pass skips it.
 func Inverse8x8(b *Block8x8) {
+	var rest int32
+	for _, v := range b[1:] {
+		rest |= v
+	}
+	if rest == 0 {
+		v := (b[0] + 32) >> 6
+		for i := range b {
+			b[i] = v
+		}
+		return
+	}
 	b[0] += 32
 	var tmp Block8x8
-	for row := 0; row < 8; row++ {
-		var src [8]int32
-		for col := 0; col < 8; col++ {
-			src[col] = b[row*8+col]
+	for r := 0; r < 64; r += 8 {
+		row := b[r : r+8 : r+8]
+		if row[0]|row[1]|row[2]|row[3]|row[4]|row[5]|row[6]|row[7] == 0 {
+			continue // tmp is already zero
 		}
-		out := idct8x1D(src)
-		for col := 0; col < 8; col++ {
-			tmp[row*8+col] = out[col]
-		}
+		tmp[r], tmp[r+1], tmp[r+2], tmp[r+3], tmp[r+4], tmp[r+5], tmp[r+6], tmp[r+7] =
+			idct8(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7])
 	}
-	for col := 0; col < 8; col++ {
-		var src [8]int32
-		for row := 0; row < 8; row++ {
-			src[row] = tmp[row*8+col]
-		}
-		out := idct8x1D(src)
-		for row := 0; row < 8; row++ {
-			b[row*8+col] = out[row] >> 6
-		}
+	for c := 0; c < 8; c++ {
+		o0, o1, o2, o3, o4, o5, o6, o7 := idct8(tmp[c], tmp[8+c], tmp[16+c], tmp[24+c], tmp[32+c], tmp[40+c], tmp[48+c], tmp[56+c])
+		b[c], b[8+c], b[16+c], b[24+c] = o0>>6, o1>>6, o2>>6, o3>>6
+		b[32+c], b[40+c], b[48+c], b[56+c] = o4>>6, o5>>6, o6>>6, o7>>6
 	}
 }
 
