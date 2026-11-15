@@ -48,9 +48,6 @@ func predictLumaBlockAvg(ref *frame.Picture, emu *[emuLumaSide * emuLumaSide]byt
 		w, h, mvx&3, mvy&3)
 }
 
-// predictChromaBlock is predictLumaBlockAvg for one chroma plane of ref (src, with
-// the picture's chroma stride and origin), at chroma position (cx, cy) and the
-// eighth-sample vector (cmvx, cmvy).
 // predictChromaPair is predictChromaBlock for both planes at once (they share
 // every parameter), with room for the two rebuilt footprints owned by the caller.
 func predictChromaPair(ref *frame.Picture, emu *[2][emuChromaSide * emuChromaSide]byte, dstCb, dstCr []byte, dstStride, dstOff, cx, cy, cw, ch, cmvx, cmvy int, avg bool) {
@@ -75,6 +72,10 @@ func predictChromaPair(ref *frame.Picture, emu *[2][emuChromaSide * emuChromaSid
 	mc.PredictChromaPair(dstCb, dstCr, dstStride, dstOff, emu[0][:], emu[1][:], emuChromaSide, 0, cw, ch, cmvx&7, cmvy&7)
 }
 
+// predictChromaBlock is predictLumaBlockAvg for one chroma plane of ref (src, with
+// the picture's chroma stride and origin), at chroma position (cx, cy) and the
+// eighth-sample vector (cmvx, cmvy). The decoder predicts both planes through
+// predictChromaPair; this one-plane form is the reference its tests compare with.
 func predictChromaBlock(ref *frame.Picture, src []byte, dst []byte, dstStride, dstOff, cx, cy, cw, ch, cmvx, cmvy int) {
 	px, py := cx+cmvx>>3, cy+cmvy>>3
 	cwPic, chPic := ref.Width/2, ref.Height/2

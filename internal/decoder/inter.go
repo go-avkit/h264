@@ -393,9 +393,9 @@ func (d *sliceDecoder) motionCompensate() {
 		use1 := seg.ref[1] >= 0
 		switch {
 		case use0 && use1 && mc.FusedAverage && d.biIsPlainAverage(seg):
-			// Luma: list 0 goes straight into the picture and list 1 is
-			// averaged into it, no block in between. Chroma keeps the two
-			// buffers.
+			// List 0 goes straight into the picture and list 1 is averaged
+			// into it, no block in between, for luma and for both chroma
+			// planes.
 			r0, r1 := d.refPictureIn(0, seg.ref[0]), d.refPictureIn(1, seg.ref[1])
 			if r0 == nil || r1 == nil {
 				break
