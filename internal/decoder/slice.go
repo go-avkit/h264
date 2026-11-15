@@ -37,9 +37,10 @@ type sliceDecoder struct {
 
 	dirBase directBase // spatial direct, once per B macroblock (binter.go)
 
-	emuLuma [emuLumaSide * emuLumaSide]byte
-	predA   predBuffer
-	predB   predBuffer
+	emuLuma   [emuLumaSide * emuLumaSide]byte
+	emuChroma [2][emuChromaSide * emuChromaSide]byte
+	predA     predBuffer
+	predB     predBuffer
 
 	cur *mbState
 	nb  neighbours

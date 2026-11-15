@@ -51,5 +51,18 @@ func PredictLumaAvg(dst []byte, dstStride, dstOff int, src []byte, srcStride, sr
 	Average(dst, dstStride, dstOff, dst, dstStride, dstOff, buf[:w*h], w, 0, w, h)
 }
 
+// PredictChromaPair is PredictChroma for the Cb and Cr planes of one block,
+// which share the position, strides, size and vector: one call of the kernels
+// where they are used, two of PredictChroma otherwise. The caller proves the
+// (w+1) x (h+1) footprint lies in both sources.
+func PredictChromaPair(dstCb, dstCr []byte, dstStride, dstOff int, srcCb, srcCr []byte, srcStride, srcOff int, w, h, mvx, mvy int) {
+	if kernelsChroma && !shares(dstCb, srcCb) && !shares(dstCb, srcCr) && !shares(dstCr, srcCb) && !shares(dstCr, srcCr) && !shares(dstCb, dstCr) {
+		kmc.PutChromaPair(dstCb, dstCr, dstOff, dstStride, srcCb, srcCr, srcOff+(mvy>>3)*srcStride+(mvx>>3), srcStride, w, h, mvx&7, mvy&7)
+		return
+	}
+	PredictChroma(dstCb, dstStride, dstOff, srcCb, srcStride, srcOff, w, h, mvx, mvy)
+	PredictChroma(dstCr, dstStride, dstOff, srcCr, srcStride, srcOff, w, h, mvx, mvy)
+}
+
 // FusedAverage reports whether PredictLumaAvg is a single fused pass.
 var FusedAverage = kernelsLuma
