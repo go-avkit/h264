@@ -345,9 +345,8 @@ func (d *sliceDecoder) addChromaResidual(res *mbResidual) {
 		for blk := 0; blk < 4; blk++ {
 			res.chromaAC[plane][blk][0] = res.chromaDC[plane][blk]
 		}
-		var blocks [16]transform.Block
-		copy(blocks[:4], res.chromaAC[plane][:])
-		addBlocks4x4(planes[plane], d.pic.StrideC, off, 4, &blocks, 0xf, qpc, scale, true)
+		copy(d.chromaBlocks[:4], res.chromaAC[plane][:])
+		addBlocks4x4(planes[plane], d.pic.StrideC, off, 4, &d.chromaBlocks, 0xf, qpc, scale, true)
 	}
 }
 
