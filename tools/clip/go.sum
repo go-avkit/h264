@@ -1,8 +1,8 @@
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
 github.com/go-avkit/bitstream v0.4.0 h1:cpPNgKWeAjEpTzjORXPH4Advu2BdtCBHloQXSwgl+pk=
 github.com/go-avkit/bitstream v0.4.0/go.mod h1:aA50I8nXKyJu6ElfTHM957BRrx5JjgSYUxs++n5VM8o=
-github.com/go-videodsp/kernels v0.3.1 h1:1zfgQ8AsQvs1HqMqhm+QxDSumlvXGp/OR+jDNdbwGeU=
-github.com/go-videodsp/kernels v0.3.1/go.mod h1:+nQCn5NvYhjT8DtUqSplgir5dB4D66rqiGd8R3fimBE=
+github.com/go-videodsp/kernels v0.4.0 h1:J97iv7NGC4EZxHu8dnXBto1MS7bwXE3FYaqOBaUFYQw=
+github.com/go-videodsp/kernels v0.4.0/go.mod h1:+nQCn5NvYhjT8DtUqSplgir5dB4D66rqiGd8R3fimBE=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
