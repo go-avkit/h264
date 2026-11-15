@@ -729,3 +729,46 @@ func TestWeightUniMatchesTheSpecification(t *testing.T) {
 		}
 	}
 }
+
+// TestWeightBiEqualWeightsAreTheDefaultAverage covers the weights the sampled
+// grid above steps over: w0 = w1 = 2^logWD, where WeightBi takes the plain
+// average path. Every pair of samples, every logWD, and the neighbours that
+// must NOT take it (an offset, another weight, another logWD) against the
+// equation of 8.4.2.3.2.
+func TestWeightBiEqualWeightsAreTheDefaultAverage(t *testing.T) {
+	type wp struct{ w0, w1, o0, o1, logWD int }
+	cases := []wp{
+		{32, 32, 0, 0, 5}, {1, 1, 0, 0, 0}, {2, 2, 0, 0, 1}, {64, 64, 0, 0, 6}, {128, 128, 0, 0, 7},
+		{32, 32, 0, -1, 5}, // (o0 + o1 + 1) >> 1 = 0: still the average
+		{32, 32, 3, 3, 5},  // offset 3
+		{32, 32, 1, 0, 5},  // (1 + 0 + 1) >> 1 = 1
+		{32, 32, -4, -4, 5},
+		{32, 32, 0, 0, 6}, // 32 is not 2^6
+		{33, 32, 0, 0, 5},
+		{32, 33, 0, 0, 5},
+		{32, 32, 0, 0, 4},
+		{64, 64, 0, 0, 5},
+	}
+	const w, h, stride = 5, 3, 8
+	for _, c := range cases {
+		for a := 0; a < 256; a++ {
+			for b := 0; b < 256; b += 5 {
+				pa := make([]byte, stride*h)
+				pb := make([]byte, stride*h)
+				for i := range pa {
+					pa[i], pb[i] = byte(a), byte(b)
+				}
+				dst := make([]byte, 2*stride*h)
+				WeightBi(dst, 2*stride, 3, pa, stride, 0, pb, stride, 0, w, h, c.w0, c.w1, c.o0, c.o1, c.logWD)
+				want := byte(specWeightBi(a, b, c.w0, c.w1, c.o0, c.o1, c.logWD))
+				for y := 0; y < h; y++ {
+					for x := 0; x < w; x++ {
+						if got := dst[3+y*2*stride+x]; got != want {
+							t.Fatalf("%+v a=%d b=%d: got %d, want %d", c, a, b, got, want)
+						}
+					}
+				}
+			}
+		}
+	}
+}

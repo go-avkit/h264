@@ -304,8 +304,11 @@ func avgBytesGeneric(dst []byte, dstStride, dstOff int, a []byte, aStride, aOff 
 		do := dstOff + y*dstStride
 		ao := aOff + y*aStride
 		bo := bOff + y*bStride
-		for x := 0; x < w; x++ {
-			dst[do+x] = byte((int(a[ao+x]) + int(b[bo+x]) + 1) >> 1)
+		out := dst[do : do+w]
+		ra := a[ao : ao+w]
+		rb := b[bo : bo+w]
+		for x := range out {
+			out[x] = byte((int(ra[x]) + int(rb[x]) + 1) >> 1)
 		}
 	}
 }
