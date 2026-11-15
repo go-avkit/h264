@@ -6,8 +6,9 @@ import (
 )
 
 // centreOracle is the centre half sample j written the way 8.4.2.2.1 states
-// it: six horizontal intermediates b1 (cc, dd, h1, m1, ee, ff), then the same
-// taps over them, Clip1((j1 + 512) >> 10). It shares nothing with
+// it in equation 8-246: six horizontal intermediates (aa, bb, b1, s1, gg, hh,
+// equation 8-241 applied to six rows), then the same taps vertically over
+// them, Clip1((j1 + 512) >> 10), equation 8-247. It shares nothing with
 // sixTapHVGeneric but the tap values.
 func centreOracle(src []byte, stride, off int) byte {
 	b1 := func(row int) int {
@@ -25,8 +26,9 @@ func centreOracle(src []byte, stride, off int) byte {
 	return byte(v)
 }
 
-// TestSixTapHVGenericMatchesTheEquations compares every block size H.264
-// predicts, with random samples and with the extremes that drive the
+// TestSixTapHVGenericMatchesTheEquations compares the widths and heights
+// {2, 4, 8, 16} in every combination (not every integer from 2 to 16: the
+// sizes H.264 predicts are among them), with random samples and with the extremes that drive the
 // intermediates to their bounds (-2550 .. 10710) and the clip at both ends.
 func TestSixTapHVGenericMatchesTheEquations(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
