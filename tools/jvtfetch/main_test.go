@@ -40,6 +40,19 @@ func run(t *testing.T, args ...string) (string, error) {
 	return out.String(), err
 }
 
+// pinFor writes NAME.sha256 for the archive's bitstream files the way
+// --write-pins does, from an unpacked copy.
+func pinFor(t *testing.T, manifests, name string, files map[string]string) {
+	t.Helper()
+	tmp := t.TempDir()
+	for f, body := range files {
+		os.WriteFile(filepath.Join(tmp, filepath.Base(f)), []byte(body), 0o644)
+	}
+	if err := writePins(tmp, filepath.Join(manifests, name+".sha256")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFetchUnpacksEachManifestEntryAndSkipsWhatIsThere(t *testing.T) {
 	archives := map[string][]byte{
 		"/A.zip": zipOf(t, map[string]string{"A.264": "bits", "../evil.txt": "x", "readme.txt": "r"}),
@@ -60,6 +73,8 @@ func TestFetchUnpacksEachManifestEntryAndSkipsWhatIsThere(t *testing.T) {
 	for _, n := range []string{"A", "B"} {
 		os.WriteFile(filepath.Join(manifests, n+".md5"), nil, 0o644)
 	}
+	pinFor(t, manifests, "A", map[string]string{"A.264": "bits"})
+	pinFor(t, manifests, "B", map[string]string{"B.jsv": "bits"})
 	out, err := run(t, "--dir", dir, "--manifests", manifests, "--url", srv.URL+"/")
 	if err != nil || !strings.Contains(out, "fetched A") || !strings.Contains(out, "fetched B") {
 		t.Fatalf("%v\n%s", err, out)
@@ -74,6 +89,63 @@ func TestFetchUnpacksEachManifestEntryAndSkipsWhatIsThere(t *testing.T) {
 	}
 	if _, err := run(t, "--dir", dir, "--manifests", manifests, "--url", srv.URL+"/"); err != nil || hits.Load() != 2 {
 		t.Fatalf("second run: %v, %d downloads, want 2 in all", err, hits.Load())
+	}
+}
+
+// A stream that is there but does not match its pin (a restored cache that was
+// swapped or truncated) is fetched again; one the network serves wrong, or with
+// no pin at all, is refused; --write-pins writes what verification then accepts.
+func TestPinsAreVerifiedAfterACacheRestore(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		switch r.URL.Path {
+		case "/A.zip":
+			w.Write(zipOf(t, map[string]string{"A.264": "good"}))
+		case "/C.zip":
+			w.Write(zipOf(t, map[string]string{"C.264": "served-wrong"}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	manifests, dir := t.TempDir(), t.TempDir()
+	os.WriteFile(filepath.Join(manifests, "A.md5"), nil, 0o644)
+	pinFor(t, manifests, "A", map[string]string{"A.264": "good"})
+
+	// A cache that holds a different stream: fetched again, and then right.
+	os.MkdirAll(filepath.Join(dir, "A"), 0o755)
+	os.WriteFile(filepath.Join(dir, "A", "A.264"), []byte("tampered"), 0o644)
+	if _, err := run(t, "--dir", dir, "--manifests", manifests, "--url", srv.URL+"/"); err != nil || hits.Load() != 1 {
+		t.Fatalf("tampered cache: %v, %d downloads, want 1", err, hits.Load())
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "A", "A.264")); string(b) != "good" {
+		t.Fatalf("the tampered stream was kept: %q", b)
+	}
+	// A good cache is not downloaded again.
+	if _, err := run(t, "--dir", dir, "--manifests", manifests, "--url", srv.URL+"/"); err != nil || hits.Load() != 1 {
+		t.Fatalf("good cache: %v, %d downloads, want 1 in all", err, hits.Load())
+	}
+	// The network serving something other than the pin: refused.
+	os.WriteFile(filepath.Join(manifests, "C.md5"), nil, 0o644)
+	pinFor(t, manifests, "C", map[string]string{"C.264": "pinned"})
+	if _, err := run(t, "--dir", dir, "--manifests", manifests, "--url", srv.URL+"/"); err == nil || !strings.Contains(err.Error(), "pin") {
+		t.Fatalf("a stream that does not match its pin was accepted: %v", err)
+	}
+	// No pin file: refused, and --write-pins creates it from what is there.
+	os.Remove(filepath.Join(manifests, "C.sha256"))
+	os.RemoveAll(filepath.Join(dir, "C"))
+	if _, err := run(t, "--dir", dir, "--manifests", manifests, "--url", srv.URL+"/"); err == nil || !strings.Contains(err.Error(), "unpinned") {
+		t.Fatalf("an unpinned stream was accepted: %v", err)
+	}
+	if _, err := run(t, "--dir", dir, "--manifests", manifests, "--url", srv.URL+"/", "--write-pins"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "--dir", dir, "--manifests", manifests, "--url", srv.URL+"/"); err != nil {
+		t.Fatalf("after --write-pins: %v", err)
+	}
+	if _, err := pinText(filepath.Join(dir, "nonexistent")); err == nil {
+		t.Error("pinText of a missing directory: no error")
 	}
 }
 
