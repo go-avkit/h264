@@ -214,15 +214,15 @@ func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int) {
 	}
 	cx := mbx*8 + e*2
 	offsets := cur.ChromaQPOffset
-	planes := [2][]byte{c.pic.Cb, c.pic.Cr}
+	var cia, cib [2]int
 	for plane := 0; plane < 2; plane++ {
 		qpc := deblock.AverageQP(
 			h264.ChromaQP(p.filterQPY(), offsets[plane]),
 			h264.ChromaQP(cur.filterQPY(), offsets[plane]))
-		deblock.FilterChromaEdgeVertical(planes[plane], c.pic.StrideC,
-			c.pic.ChromaOffset(cx, mby*8), bs,
-			deblock.IndexA(qpc, cur.AlphaOffset), deblock.IndexB(qpc, cur.BetaOffset))
+		cia[plane], cib[plane] = deblock.IndexA(qpc, cur.AlphaOffset), deblock.IndexB(qpc, cur.BetaOffset)
 	}
+	deblock.FilterChromaPairVertical(c.pic.Cb, c.pic.Cr, c.pic.StrideC,
+		c.pic.ChromaOffset(cx, mby*8), bs, cia[0], cib[0], cia[1], cib[1])
 }
 
 func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int) {
@@ -264,13 +264,13 @@ func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int) {
 	}
 	cy := mby*8 + e*2
 	offsets := cur.ChromaQPOffset
-	planes := [2][]byte{c.pic.Cb, c.pic.Cr}
+	var ia, ib [2]int
 	for plane := 0; plane < 2; plane++ {
 		qpc := deblock.AverageQP(
 			h264.ChromaQP(p.filterQPY(), offsets[plane]),
 			h264.ChromaQP(cur.filterQPY(), offsets[plane]))
-		deblock.FilterChromaEdgeHorizontal(planes[plane], c.pic.StrideC,
-			c.pic.ChromaOffset(mbx*8, cy), bs,
-			deblock.IndexA(qpc, cur.AlphaOffset), deblock.IndexB(qpc, cur.BetaOffset))
+		ia[plane], ib[plane] = deblock.IndexA(qpc, cur.AlphaOffset), deblock.IndexB(qpc, cur.BetaOffset)
 	}
+	deblock.FilterChromaPairHorizontal(c.pic.Cb, c.pic.Cr, c.pic.StrideC,
+		c.pic.ChromaOffset(mbx*8, cy), bs, ia[0], ib[0], ia[1], ib[1])
 }

@@ -1,6 +1,7 @@
 package mc
 
 import (
+	"bytes"
 	"math/rand"
 	"testing"
 )
@@ -103,10 +104,24 @@ func TestSharedBuffersTakeThePortablePath(t *testing.T) {
 						}
 					}
 				}
-				// Destination inside the source footprint: must not panic.
+				// Destination inside the source footprint: the result must be
+				// the portable path's on the same memory, asserted on the
+				// samples (a missing guard also panics in the kernel, but the
+				// guard is tested by what it chooses, not by the panic).
 				mix := append([]byte(nil), p.buf...)
+				ref := append([]byte(nil), p.buf...)
 				PredictLuma(mix[p.off(0, 0):], p.stride, 0, mix, p.stride, p.off(0, 0), w, h, xFrac, yFrac)
+				predictLumaPortable(ref[p.off(0, 0):], p.stride, 0, ref, p.stride, p.off(0, 0), w, h, xFrac, yFrac)
+				if !bytes.Equal(mix, ref) {
+					t.Fatalf("PredictLuma frac(%d,%d) on overlapping memory differs from the portable path", xFrac, yFrac)
+				}
 				PredictLumaAvg(mix[p.off(0, 0):], p.stride, 0, mix, p.stride, p.off(0, 0), w, h, xFrac, yFrac)
+				var tmp [256]byte
+				predictLumaPortable(tmp[:w*h], w, 0, ref, p.stride, p.off(0, 0), w, h, xFrac, yFrac)
+				Average(ref[p.off(0, 0):], p.stride, 0, ref[p.off(0, 0):], p.stride, 0, tmp[:w*h], w, 0, w, h)
+				if !bytes.Equal(mix, ref) {
+					t.Fatalf("PredictLumaAvg frac(%d,%d) on overlapping memory differs from the portable path", xFrac, yFrac)
+				}
 			}
 		}
 	}
