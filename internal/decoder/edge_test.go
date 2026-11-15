@@ -9,6 +9,12 @@ import (
 	"github.com/go-avkit/h264/internal/mc"
 )
 
+// predictLumaBlock is predictLumaBlockAvg without the average.
+func predictLumaBlock(ref *frame.Picture, dst []byte, dstStride, dstOff, x, y, w, h, mvx, mvy int) {
+	var emu [emuLumaSide * emuLumaSide]byte
+	predictLumaBlockAvg(ref, &emu, dst, dstStride, dstOff, x, y, w, h, mvx, mvy, false)
+}
+
 // randomPicture is a picture of wMB x hMB macroblocks whose visible samples
 // come from fill and whose border is left as zeros (nothing extended it).
 func randomPicture(wMB, hMB int, fill func() byte) *frame.Picture {
@@ -224,6 +230,53 @@ func TestPredictOneFarOutsideMatchesTheClampedRead(t *testing.T) {
 								pm[0], pm[1], pl.name, cw, ch, cx, cy, mvx, mvy, i, j, pl.dst[j*8+i], want)
 						}
 					}
+				}
+			}
+		}
+	}
+}
+
+// TestBiLumaPutThenAverageMatchesTheEquations is the luma half of the fused
+// bi-prediction path: list 0 replaces the samples, list 1 is averaged into
+// them (8-273), with vectors up to +-2048 quarter samples from two different
+// reference pictures, against the clamped-read reference.
+func TestBiLumaPutThenAverageMatchesTheEquations(t *testing.T) {
+	rng := rand.New(rand.NewSource(12))
+	sizes := [][2]int{{16, 16}, {16, 8}, {8, 16}, {8, 8}, {8, 4}, {4, 8}, {4, 4}, {4, 16}}
+	r0 := randomPicture(3, 2, func() byte { return byte(rng.Intn(256)) })
+	r1 := randomPicture(3, 2, func() byte { return byte(rng.Intn(256)) })
+	get := func(p *frame.Picture) func(x, y int) int {
+		return func(x, y int) int {
+			return int(p.Y[p.LumaOffset(min(max(x, 0), p.Width-1), min(max(y, 0), p.Height-1))])
+		}
+	}
+	g0, g1 := get(r0), get(r1)
+	sd := &sliceDecoder{refList: []*frame.Picture{r0}, refListL1: []*frame.Picture{r1}}
+	for n := 0; n < 8000; n++ {
+		sz := sizes[rng.Intn(len(sizes))]
+		w, h := sz[0], sz[1]
+		x := rng.Intn(r0.Width/w) * w
+		y := rng.Intn(r0.Height/h) * h
+		var mv [2][2]int
+		for l := 0; l < 2; l++ {
+			mv[l] = [2]int{rng.Intn(4097) - 2048, rng.Intn(4097) - 2048}
+			if n%3 == l {
+				mv[l] = [2]int{rng.Intn(65)*4 - 128 + rng.Intn(4), rng.Intn(65)*4 - 128 + rng.Intn(4)}
+			}
+		}
+		seg := motionSegment{x: x, y: y, w: w, h: h, ref: [2]int8{0, 0}}
+		for l := 0; l < 2; l++ {
+			seg.mv[l] = [2]int16{int16(mv[l][0]), int16(mv[l][1])}
+		}
+		dst := make([]byte, 16*16)
+		sd.predictLumaSeg(r0, seg, 0, x, y, dst, 16, 0, false)
+		sd.predictLumaSeg(r1, seg, 1, x, y, dst, 16, 0, true)
+		for j := 0; j < h; j++ {
+			for i := 0; i < w; i++ {
+				a := specLuma(g0, x+mv[0][0]>>2+i, y+mv[0][1]>>2+j, mv[0][0]&3, mv[0][1]&3)
+				b := specLuma(g1, x+mv[1][0]>>2+i, y+mv[1][1]>>2+j, mv[1][0]&3, mv[1][1]&3)
+				if want := (a + b + 1) >> 1; int(dst[j*16+i]) != want {
+					t.Fatalf("%dx%d at (%d,%d) mv %v sample (%d,%d): got %d, want %d", w, h, x, y, mv, i, j, dst[j*16+i], want)
 				}
 			}
 		}

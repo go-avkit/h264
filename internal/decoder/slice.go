@@ -29,8 +29,9 @@ type sliceDecoder struct {
 	weights         *predWeights
 	weightMode      int
 
-	predA predBuffer
-	predB predBuffer
+	emuLuma [emuLumaSide * emuLumaSide]byte
+	predA   predBuffer
+	predB   predBuffer
 
 	cur *mbState
 	nb  neighbours

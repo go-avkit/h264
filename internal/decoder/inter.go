@@ -264,6 +264,15 @@ func (d *sliceDecoder) predictOne(list int, seg motionSegment, x, y int,
 	if ref == nil {
 		return false
 	}
+	d.predictLumaSeg(ref, seg, list, x, y, dstY, strideY, offY, false)
+	predictChromaSeg(ref, seg, list, x, y, dstCb, dstCr, strideC, offC)
+	return true
+}
+
+// predictLumaSeg predicts the luma of seg from ref, list's vector clamped to
+// the reference's border (the margin that used to be padded), into dst, or
+// averaged into dst when avg is set.
+func (d *sliceDecoder) predictLumaSeg(ref *frame.Picture, seg motionSegment, list, x, y int, dst []byte, stride, off int, avg bool) {
 	mv := seg.mv[list]
 	mvx := clampComponent(int(mv[0]),
 		lumaTapBefore-frame.LumaMargin-x,
@@ -271,8 +280,11 @@ func (d *sliceDecoder) predictOne(list int, seg motionSegment, x, y int,
 	mvy := clampComponent(int(mv[1]),
 		lumaTapBefore-frame.LumaMargin-y,
 		ref.Height+frame.LumaMargin-lumaTapAfter-y-seg.h, 2)
-	predictLumaBlock(ref, dstY, strideY, offY, x, y, seg.w, seg.h, mvx, mvy)
+	predictLumaBlockAvg(ref, &d.emuLuma, dst, stride, off, x, y, seg.w, seg.h, mvx, mvy, avg)
+}
 
+func predictChromaSeg(ref *frame.Picture, seg motionSegment, list, x, y int, dstCb, dstCr []byte, strideC, offC int) {
+	mv := seg.mv[list]
 	cx, cy := x/2, y/2
 	cw, ch := seg.w/2, seg.h/2
 	cmvx := clampComponent(int(mv[0]),
@@ -283,7 +295,6 @@ func (d *sliceDecoder) predictOne(list int, seg motionSegment, x, y int,
 		ref.Height/2+frame.ChromaMargin-chromaTapAfter-cy-ch, 3)
 	predictChromaBlock(ref, ref.Cb, dstCb, strideC, offC, cx, cy, cw, ch, cmvx, cmvy)
 	predictChromaBlock(ref, ref.Cr, dstCr, strideC, offC, cx, cy, cw, ch, cmvx, cmvy)
-	return true
 }
 
 func (d *sliceDecoder) weightEntry(list int, ref int8) *weightEntry {
@@ -317,6 +328,20 @@ func (d *sliceDecoder) weightUni(list int, seg motionSegment, x, y int) {
 		int(e.ChromaWeight[0]), int(e.ChromaOffset[0]), logWDC)
 	mc.WeightUni(d.pic.Cr, d.pic.StrideC, d.pic.ChromaOffset(cx, cy), cw, ch,
 		int(e.ChromaWeight[1]), int(e.ChromaOffset[1]), logWDC)
+}
+
+// biIsPlainAverage reports whether combineBi would reduce the two predictions
+// of seg to the default average of 8.4.2.3.1: no weighting at all, or implicit
+// weights that came out (32, 32) (8-280, 8-281).
+func (d *sliceDecoder) biIsPlainAverage(seg motionSegment) bool {
+	switch d.weightMode {
+	case weightImplicit:
+		w0, w1 := d.implicitWeights(seg.ref[0], seg.ref[1])
+		return w0 == 32 && w1 == 32
+	case weightExplicit:
+		return false
+	}
+	return true
 }
 
 func (d *sliceDecoder) combineBi(seg motionSegment, x, y int) {
@@ -369,6 +394,23 @@ func (d *sliceDecoder) motionCompensate() {
 		use0 := seg.ref[0] >= 0
 		use1 := seg.ref[1] >= 0
 		switch {
+		case use0 && use1 && mc.FusedAverage && d.biIsPlainAverage(seg):
+			// Luma: list 0 goes straight into the picture and list 1 is
+			// averaged into it, no block in between. Chroma keeps the two
+			// buffers.
+			r0, r1 := d.refPictureIn(0, seg.ref[0]), d.refPictureIn(1, seg.ref[1])
+			if r0 == nil || r1 == nil {
+				break
+			}
+			lumaOff := d.pic.LumaOffset(x, y)
+			d.predictLumaSeg(r0, seg, 0, x, y, d.pic.Y, d.pic.StrideY, lumaOff, false)
+			d.predictLumaSeg(r1, seg, 1, x, y, d.pic.Y, d.pic.StrideY, lumaOff, true)
+			predictChromaSeg(r0, seg, 0, x, y, d.predA.cb[:], d.predA.cr[:], 8, 0)
+			predictChromaSeg(r1, seg, 1, x, y, d.predB.cb[:], d.predB.cr[:], 8, 0)
+			cx, cy, cw, ch := x/2, y/2, seg.w/2, seg.h/2
+			chromaOff := d.pic.ChromaOffset(cx, cy)
+			mc.Average(d.pic.Cb, d.pic.StrideC, chromaOff, d.predA.cb[:], 8, 0, d.predB.cb[:], 8, 0, cw, ch)
+			mc.Average(d.pic.Cr, d.pic.StrideC, chromaOff, d.predA.cr[:], 8, 0, d.predB.cr[:], 8, 0, cw, ch)
 		case use0 && use1:
 			okA := d.predictOne(0, seg, x, y, d.predA.y[:], 16, 0, d.predA.cb[:], d.predA.cr[:], 8, 0)
 			okB := d.predictOne(1, seg, x, y, d.predB.y[:], 16, 0, d.predB.cb[:], d.predB.cr[:], 8, 0)

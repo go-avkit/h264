@@ -1,5 +1,7 @@
 module github.com/go-avkit/h264
 
-go 1.27.1
+go 1.27.4
 
 require github.com/go-avkit/bitstream v0.4.0
+
+require github.com/go-videodsp/kernels v0.1.0 // indirect
