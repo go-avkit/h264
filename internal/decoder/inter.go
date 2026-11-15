@@ -271,8 +271,7 @@ func (d *sliceDecoder) predictOne(list int, seg motionSegment, x, y int,
 	mvy := clampComponent(int(mv[1]),
 		lumaTapBefore-frame.LumaMargin-y,
 		ref.Height+frame.LumaMargin-lumaTapAfter-y-seg.h, 2)
-	mc.PredictLuma(dstY, strideY, offY, ref.Y, ref.StrideY, ref.LumaOffset(x, y),
-		seg.w, seg.h, mvx, mvy)
+	predictLumaBlock(ref, dstY, strideY, offY, x, y, seg.w, seg.h, mvx, mvy)
 
 	cx, cy := x/2, y/2
 	cw, ch := seg.w/2, seg.h/2
@@ -282,10 +281,8 @@ func (d *sliceDecoder) predictOne(list int, seg motionSegment, x, y int,
 	cmvy := clampComponent(int(mv[1]),
 		-frame.ChromaMargin-cy,
 		ref.Height/2+frame.ChromaMargin-chromaTapAfter-cy-ch, 3)
-	mc.PredictChroma(dstCb, strideC, offC, ref.Cb, ref.StrideC, ref.ChromaOffset(cx, cy),
-		cw, ch, cmvx, cmvy)
-	mc.PredictChroma(dstCr, strideC, offC, ref.Cr, ref.StrideC, ref.ChromaOffset(cx, cy),
-		cw, ch, cmvx, cmvy)
+	predictChromaBlock(ref, ref.Cb, dstCb, strideC, offC, cx, cy, cw, ch, cmvx, cmvy)
+	predictChromaBlock(ref, ref.Cr, dstCr, strideC, offC, cx, cy, cw, ch, cmvx, cmvy)
 	return true
 }
 

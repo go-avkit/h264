@@ -255,7 +255,8 @@ func (d *Decoder) finishPicture() []*frame.Picture {
 			return &m.MB
 		})
 	}
-	pic.ExtendBorders()
+	// No border extension: a prediction block that leaves the picture is
+	// rebuilt by predictLumaBlock / predictChromaBlock.
 	if d.grid != nil {
 		// Only a reference picture can be a co-located picture (8.4.1.2.1
 		// draws it from RefPicList1[0]), so only it keeps its motion.
