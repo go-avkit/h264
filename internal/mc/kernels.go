@@ -51,5 +51,41 @@ func PredictLumaAvg(dst []byte, dstStride, dstOff int, src []byte, srcStride, sr
 	Average(dst, dstStride, dstOff, dst, dstStride, dstOff, buf[:w*h], w, 0, w, h)
 }
 
+// chromaKernelSize reports whether the kernels predict a w x h chroma block:
+// 2, 4 or 8 each way. Merged runs of equal motion make others (4x6, 6x8...),
+// which take the portable path.
+func chromaKernelSize(w, h int) bool {
+	return (w == 8 || w == 4 || w == 2) && (h == 8 || h == 4 || h == 2)
+}
+
+// PredictChromaPair is PredictChroma for the Cb and Cr planes of one block,
+// which share the position, strides, size and vector: one call of the kernels
+// where they are used, two of PredictChroma otherwise. The caller proves the
+// (w+1) x (h+1) footprint lies in both sources.
+func PredictChromaPair(dstCb, dstCr []byte, dstStride, dstOff int, srcCb, srcCr []byte, srcStride, srcOff int, w, h, mvx, mvy int) {
+	if kernelsChroma && chromaKernelSize(w, h) && !shares(dstCb, srcCb) && !shares(dstCb, srcCr) && !shares(dstCr, srcCb) && !shares(dstCr, srcCr) && !shares(dstCb, dstCr) {
+		kmc.PutChromaPair(dstCb, dstCr, dstOff, dstStride, srcCb, srcCr, srcOff+(mvy>>3)*srcStride+(mvx>>3), srcStride, w, h, mvx&7, mvy&7)
+		return
+	}
+	PredictChroma(dstCb, dstStride, dstOff, srcCb, srcStride, srcOff, w, h, mvx, mvy)
+	PredictChroma(dstCr, dstStride, dstOff, srcCr, srcStride, srcOff, w, h, mvx, mvy)
+}
+
+// PredictChromaPairAvg is PredictChromaPair averaged into the destinations,
+// (dst + p + 1) >> 1 (8-273): the second prediction of a bi-predicted block.
+// One fused call of the kernels where they are used; otherwise a prediction
+// block per plane and the average.
+func PredictChromaPairAvg(dstCb, dstCr []byte, dstStride, dstOff int, srcCb, srcCr []byte, srcStride, srcOff int, w, h, mvx, mvy int) {
+	if kernelsChroma && chromaKernelSize(w, h) && !shares(dstCb, srcCb) && !shares(dstCb, srcCr) && !shares(dstCr, srcCb) && !shares(dstCr, srcCr) && !shares(dstCb, dstCr) {
+		kmc.AvgChromaPair(dstCb, dstCr, dstOff, dstStride, srcCb, srcCr, srcOff+(mvy>>3)*srcStride+(mvx>>3), srcStride, w, h, mvx&7, mvy&7)
+		return
+	}
+	var cb, cr [64]byte
+	PredictChroma(cb[:w*h], w, 0, srcCb, srcStride, srcOff, w, h, mvx, mvy)
+	PredictChroma(cr[:w*h], w, 0, srcCr, srcStride, srcOff, w, h, mvx, mvy)
+	Average(dstCb, dstStride, dstOff, dstCb, dstStride, dstOff, cb[:w*h], w, 0, w, h)
+	Average(dstCr, dstStride, dstOff, dstCr, dstStride, dstOff, cr[:w*h], w, 0, w, h)
+}
+
 // FusedAverage reports whether PredictLumaAvg is a single fused pass.
 var FusedAverage = kernelsLuma

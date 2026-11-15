@@ -12,4 +12,5 @@ import "github.com/go-videodsp/kernels/cpu"
 var (
 	kernelsLuma   = cpu.HasAVX2
 	kernelsWeight = cpu.HasAVX2
+	kernelsChroma = cpu.HasAVX2
 )

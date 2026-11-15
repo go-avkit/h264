@@ -264,7 +264,7 @@ func (d *sliceDecoder) predictOne(list int, seg motionSegment, x, y int,
 		return false
 	}
 	d.predictLumaSeg(ref, seg, list, x, y, dstY, strideY, offY, false)
-	predictChromaSeg(ref, seg, list, x, y, dstCb, dstCr, strideC, offC)
+	predictChromaSeg(ref, &d.emuChroma, seg, list, x, y, dstCb, dstCr, strideC, offC, false)
 	return true
 }
 
@@ -282,7 +282,7 @@ func (d *sliceDecoder) predictLumaSeg(ref *frame.Picture, seg motionSegment, lis
 	predictLumaBlockAvg(ref, &d.emuLuma, dst, stride, off, x, y, seg.w, seg.h, mvx, mvy, avg)
 }
 
-func predictChromaSeg(ref *frame.Picture, seg motionSegment, list, x, y int, dstCb, dstCr []byte, strideC, offC int) {
+func predictChromaSeg(ref *frame.Picture, emu *[2][emuChromaSide * emuChromaSide]byte, seg motionSegment, list, x, y int, dstCb, dstCr []byte, strideC, offC int, avg bool) {
 	mv := seg.mv[list]
 	cx, cy := x/2, y/2
 	cw, ch := seg.w/2, seg.h/2
@@ -292,8 +292,7 @@ func predictChromaSeg(ref *frame.Picture, seg motionSegment, list, x, y int, dst
 	cmvy := clampComponent(int(mv[1]),
 		-frame.ChromaMargin-cy,
 		ref.Height/2+frame.ChromaMargin-chromaTapAfter-cy-ch, 3)
-	predictChromaBlock(ref, ref.Cb, dstCb, strideC, offC, cx, cy, cw, ch, cmvx, cmvy)
-	predictChromaBlock(ref, ref.Cr, dstCr, strideC, offC, cx, cy, cw, ch, cmvx, cmvy)
+	predictChromaPair(ref, emu, dstCb, dstCr, strideC, offC, cx, cy, cw, ch, cmvx, cmvy, avg)
 }
 
 func (d *sliceDecoder) weightEntry(list int, ref int8) *weightEntry {
@@ -404,12 +403,9 @@ func (d *sliceDecoder) motionCompensate() {
 			lumaOff := d.pic.LumaOffset(x, y)
 			d.predictLumaSeg(r0, seg, 0, x, y, d.pic.Y, d.pic.StrideY, lumaOff, false)
 			d.predictLumaSeg(r1, seg, 1, x, y, d.pic.Y, d.pic.StrideY, lumaOff, true)
-			predictChromaSeg(r0, seg, 0, x, y, d.predA.cb[:], d.predA.cr[:], 8, 0)
-			predictChromaSeg(r1, seg, 1, x, y, d.predB.cb[:], d.predB.cr[:], 8, 0)
-			cx, cy, cw, ch := x/2, y/2, seg.w/2, seg.h/2
-			chromaOff := d.pic.ChromaOffset(cx, cy)
-			mc.Average(d.pic.Cb, d.pic.StrideC, chromaOff, d.predA.cb[:], 8, 0, d.predB.cb[:], 8, 0, cw, ch)
-			mc.Average(d.pic.Cr, d.pic.StrideC, chromaOff, d.predA.cr[:], 8, 0, d.predB.cr[:], 8, 0, cw, ch)
+			chromaOff := d.pic.ChromaOffset(x/2, y/2)
+			predictChromaSeg(r0, &d.emuChroma, seg, 0, x, y, d.pic.Cb, d.pic.Cr, d.pic.StrideC, chromaOff, false)
+			predictChromaSeg(r1, &d.emuChroma, seg, 1, x, y, d.pic.Cb, d.pic.Cr, d.pic.StrideC, chromaOff, true)
 		case use0 && use1:
 			okA := d.predictOne(0, seg, x, y, d.predA.y[:], 16, 0, d.predA.cb[:], d.predA.cr[:], 8, 0)
 			okB := d.predictOne(1, seg, x, y, d.predB.y[:], 16, 0, d.predB.cb[:], d.predB.cr[:], 8, 0)

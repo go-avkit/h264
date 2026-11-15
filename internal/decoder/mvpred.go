@@ -107,13 +107,63 @@ func median(a, b, c int16) int16 {
 	return b
 }
 
+// neighboursFor is 6.4.11.7 for the partition at (x, y) of width w: A is the
+// block to its left, B above, C above and to the right, with D (above left)
+// standing in for C when C is not available. Each neighbour is located by
+// its raster row and column directly (6.4.12.1 for the cases inside the
+// macroblock, 6.4.12 for the four neighbouring macroblocks), which is what
+// neighbourBlock derives from luma locations one call at a time; the test
+// pins the two together over every partition shape.
 func (d *sliceDecoder) neighboursFor(list, x, y, w int) (a, b, c motion) {
-	curZ := zscanOf[y>>2][x>>2]
-	a, okA := d.neighbourMotion(list, x-1, y, curZ)
-	b, okB := d.neighbourMotion(list, x, y-1, curZ)
-	c, okC := d.neighbourMotion(list, x+w, y-1, curZ)
+	row, col := y>>2, x>>2
+	curZ := zscanOf[row][col]
+	none := motion{ref: -1}
+	okA, okB, okC := true, true, true
+	switch {
+	case col > 0:
+		a = blockMotion(d.cur, list, zscanOf[row][col-1])
+	case d.nb.left != nil:
+		a = blockMotion(d.nb.left, list, zscanOf[row][3])
+	default:
+		a, okA = none, false
+	}
+	switch {
+	case row > 0:
+		b = blockMotion(d.cur, list, zscanOf[row-1][col])
+	case d.nb.top != nil:
+		b = blockMotion(d.nb.top, list, zscanOf[3][col])
+	default:
+		b, okB = none, false
+	}
+	cx := (x + w) >> 2
+	switch {
+	case row > 0:
+		if cx < 4 && zscanOf[row-1][cx] < curZ {
+			c = blockMotion(d.cur, list, zscanOf[row-1][cx])
+		} else {
+			okC = false
+		}
+	case cx < 4 && d.nb.top != nil:
+		c = blockMotion(d.nb.top, list, zscanOf[3][cx])
+	case cx >= 4 && d.nb.topRight != nil:
+		c = blockMotion(d.nb.topRight, list, zscanOf[3][0])
+	default:
+		okC = false
+	}
 	if !okC {
-		c, okC = d.neighbourMotion(list, x-1, y-1, curZ)
+		okC = true
+		switch {
+		case row > 0 && col > 0:
+			c = blockMotion(d.cur, list, zscanOf[row-1][col-1])
+		case row > 0 && d.nb.left != nil:
+			c = blockMotion(d.nb.left, list, zscanOf[row-1][3])
+		case row == 0 && col > 0 && d.nb.top != nil:
+			c = blockMotion(d.nb.top, list, zscanOf[3][col-1])
+		case row == 0 && col == 0 && d.nb.topLeft != nil:
+			c = blockMotion(d.nb.topLeft, list, zscanOf[3][3])
+		default:
+			c, okC = none, false
+		}
 	}
 	if !okB && !okC && okA {
 		b, c = a, a

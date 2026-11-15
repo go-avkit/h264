@@ -1,6 +1,8 @@
 package loopfilter
 
 import (
+	"encoding/binary"
+
 	h264 "github.com/go-avkit/h264"
 	"github.com/go-avkit/h264/internal/deblock"
 	"github.com/go-avkit/h264/internal/frame"
@@ -95,6 +97,90 @@ func edgeStrength(p, q *MB, pBlk, qBlk int, mbEdge bool) uint8 {
 	return 0
 }
 
+// rasterBlk maps a raster position (row*4+column of a 4x4 block) to the
+// block index the per-block arrays use.
+var rasterBlk = [16]int{0, 1, 4, 5, 2, 3, 6, 7, 8, 9, 12, 13, 10, 11, 14, 15}
+
+// nzMask returns lumaNonZero of every block of m as one bit per block index,
+// so an edge reads sixteen answers computed once instead of recomputing them
+// (with the 8x8 and IPCM cases) for each of its eight uses. The bytes of
+// NzY are tested eight at a time: the carry-free sum sets bit 7 of every
+// non-zero byte, and the multiplication gathers those eight bits into one.
+func nzMask(m *MB) uint16 {
+	if m.IPCM {
+		return 0xffff
+	}
+	lo := gather(binary.LittleEndian.Uint64(m.NzY[0:8]))
+	hi := gather(binary.LittleEndian.Uint64(m.NzY[8:16]))
+	r := uint16(lo) | uint16(hi)<<8
+	if m.Transform8x8 {
+		// an 8x8 block carries its coefficients in all four of its 4x4 blocks
+		r |= r>>1 | r>>2 | r>>3
+		r &= 0x1111
+		r *= 15
+	}
+	return r
+}
+
+// gather returns bit i set when byte i of w is not zero.
+func gather(w uint64) uint64 {
+	const low7 = 0x7f7f7f7f7f7f7f7f
+	t := ((w & low7) + low7 | w) & ^uint64(low7)
+	return (t >> 7) * 0x0102040810204080 >> 56
+}
+
+// rasterQuad maps a raster position to its 8x8 quadrant.
+var rasterQuad = [16]uint8{0, 0, 1, 1, 0, 0, 1, 1, 2, 2, 3, 3, 2, 2, 3, 3}
+
+// quadUniform sets bit q when the four blocks of 8x8 quadrant q carry the
+// same prediction (what motionDiffers compares). Quadrant q holds blocks 4q..4q+3.
+func quadUniform(m *MB) uint8 {
+	var u uint8
+	for q := 0; q < 4; q++ {
+		b := q * 4
+		same := true
+		for i := 1; i < 4; i++ {
+			if m.RefPicL0[b+i] != m.RefPicL0[b] || m.MvL0[b+i] != m.MvL0[b] ||
+				m.Bipredictive && (m.RefPicL1[b+i] != m.RefPicL1[b] || m.MvL1[b+i] != m.MvL1[b]) {
+				same = false
+				break
+			}
+		}
+		if same {
+			u |= 1 << uint(q)
+		}
+	}
+	return u
+}
+
+// edgeStrengths is edgeStrength for the four 4-sample groups of one edge. The
+// groups run along the edge: pr and qr are the raster positions of the first
+// group's blocks on each side and step moves to the next group. It returns
+// the same four values as four calls of edgeStrength.
+func edgeStrengths(p, q *MB, pnz, qnz uint16, uni uint8, pr, qr, step int, mbEdge, inside bool) (bs [4]uint8, any bool) {
+	if p.Intra || q.Intra {
+		v := uint8(3)
+		if mbEdge {
+			v = 4
+		}
+		return [4]uint8{v, v, v, v}, true
+	}
+	for g := 0; g < 4; g++ {
+		pi, qi := pr+g*step, qr+g*step
+		switch {
+		case pnz>>uint(rasterBlk[pi])&1|qnz>>uint(rasterBlk[qi])&1 != 0:
+			bs[g] = 2
+			any = true
+		case inside && uni>>uint(rasterQuad[qi])&1 != 0:
+			// both blocks lie in one 8x8 quadrant of uniform motion
+		case motionDiffers(p, q, rasterBlk[pi], rasterBlk[qi]):
+			bs[g] = 1
+			any = true
+		}
+	}
+	return bs, any
+}
+
 type edgeContext struct {
 	at  func(mbx, mby int) *MB
 	pic *frame.Picture
@@ -142,11 +228,23 @@ func (c *edgeContext) filterMB(mbx, mby int) {
 	if cur.internalEdgesUnfiltered() {
 		last = 1
 	}
-	for e := 0; e < last; e += step {
-		c.verticalEdge(cur, left, mbx, mby, e)
+	cnz := nzMask(cur)
+	var uni uint8
+	if !cur.Intra && last > 1 && step == 1 {
+		uni = quadUniform(cur)
+	}
+	var lnz, tnz uint16
+	if left != nil {
+		lnz = nzMask(left)
+	}
+	if top != nil {
+		tnz = nzMask(top)
 	}
 	for e := 0; e < last; e += step {
-		c.horizontalEdge(cur, top, mbx, mby, e)
+		c.verticalEdge(cur, left, mbx, mby, e, cnz, lnz, uni)
+	}
+	for e := 0; e < last; e += step {
+		c.horizontalEdge(cur, top, mbx, mby, e, cnz, tnz, uni)
 	}
 }
 
@@ -174,32 +272,17 @@ func (m *MB) internalEdgesUnfiltered() bool {
 	return true
 }
 
-func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int) {
-	p := cur
+func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int, cnz, lnz uint16, uni uint8) {
+	p, pnz, pr := cur, cnz, e-1
 	mbEdge := e == 0
 	if mbEdge {
 		if left == nil {
 			return
 		}
-		p = left
+		p, pnz, pr = left, lnz, 3
 	}
 	x := e * 4
-	var bs [4]uint8
-	any := false
-	for g := 0; g < 4; g++ {
-		y := g * 4
-		qBlk := BlkIdxAt(x, y)
-		var pBlk int
-		if mbEdge {
-			pBlk = BlkIdxAt(12, y)
-		} else {
-			pBlk = BlkIdxAt(x-4, y)
-		}
-		bs[g] = edgeStrength(p, cur, pBlk, qBlk, mbEdge)
-		if bs[g] != 0 {
-			any = true
-		}
-	}
+	bs, any := edgeStrengths(p, cur, pnz, cnz, uni, pr, e, 4, mbEdge, e&1 != 0)
 	if !any {
 		return
 	}
@@ -225,32 +308,17 @@ func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int) {
 		c.pic.ChromaOffset(cx, mby*8), bs, cia[0], cib[0], cia[1], cib[1])
 }
 
-func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int) {
-	p := cur
+func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int, cnz, tnz uint16, uni uint8) {
+	p, pnz, pr := cur, cnz, (e-1)*4
 	mbEdge := e == 0
 	if mbEdge {
 		if top == nil {
 			return
 		}
-		p = top
+		p, pnz, pr = top, tnz, 12
 	}
 	y := e * 4
-	var bs [4]uint8
-	any := false
-	for g := 0; g < 4; g++ {
-		x := g * 4
-		qBlk := BlkIdxAt(x, y)
-		var pBlk int
-		if mbEdge {
-			pBlk = BlkIdxAt(x, 12)
-		} else {
-			pBlk = BlkIdxAt(x, y-4)
-		}
-		bs[g] = edgeStrength(p, cur, pBlk, qBlk, mbEdge)
-		if bs[g] != 0 {
-			any = true
-		}
-	}
+	bs, any := edgeStrengths(p, cur, pnz, cnz, uni, pr, e*4, 1, mbEdge, e&1 != 0)
 	if !any {
 		return
 	}
