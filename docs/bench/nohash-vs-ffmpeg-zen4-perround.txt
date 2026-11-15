@@ -8,9 +8,10 @@ What each side times (the ratio is not like for like, and slightly favours go-av
                  and the process is running, no demux, no output.
   ffmpeg:        utime + stime of the whole process (-benchmark), so it includes process start, the demuxer
                  (raw Annex B probing) and the null muxer. That fixed cost is measured at the end: about
-                 0.011 s for a tiny stream, i.e. 1.2 % of ffmpeg's 0.93 s on alien and 3.6 % of its 0.30 s on
-                 fade. Subtracting it would move the ratios from 0.31x to 0.31x (alien: 0.93/3.03) and from
-                 0.265x to 0.255x (fade: 0.29/1.136) at most; they are not subtracted below.
+                 0.011 s for a tiny stream, i.e. 1.2 % of ffmpeg's 0.94 s on alien and 3.6 % of its 0.30 s on
+                 fade. Subtracting it moves the ratios (ffmpeg time / ours) from 0.31x to 0.30x on alien
+                 (0.94/3.03 to 0.93/3.03) and from 0.265x to 0.254x on fade (0.301/1.136 to 0.290/1.136);
+                 they are not subtracted in the table below.
 
 go: tools/clip --nohash (main at 46683e0 not rebuilt: clip_b0 = main before the spatial-direct PR)
 clip alien: round loadavg(1,5,15) go_seconds ffmpeg_utime ffmpeg_stime
