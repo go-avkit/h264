@@ -53,6 +53,9 @@ jobs:
       - name: Test the tools module
         working-directory: tools
         run: go vet ./... && go test -race ./...
+      - name: Test the clip tool (its own module, which replaces the root module)
+        working-directory: tools/clip
+        run: go vet ./... && go test -race ./...
       - name: Test + 100% coverage gate
         shell: bash
         run: |
@@ -156,9 +159,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # The Go module cache (cobra for jvtfetch lives in the tools module, whose
+      # go.sum the default cache key does not read) and the streams are cached, so
+      # a proxy.golang.org or itu.int timeout no longer fails the lane once a run
+      # has succeeded. The streams are keyed by the manifests that pin them.
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
+      - name: Restore the JVT streams
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/jvt
+          key: jvt-${{ hashFiles('testdata/jvt/*.md5') }}
       - name: Fetch the JVT streams
         working-directory: tools
         run: go run ./jvtfetch --dir "$RUNNER_TEMP/jvt" --manifests ../testdata/jvt

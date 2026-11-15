@@ -1,0 +1,88 @@
+go-avkit/h264 main at bfc1196 (go-videodsp/kernels v0.3.1) against ffmpeg 6.1.1, decode alone.
+AMD Ryzen 9 7950X, one core (taskset -c 9). Neither side hashes the pictures:
+  go:     GOMAXPROCS=1 clip --nohash --in X.264   (tools/clip; wall time of the decode, seconds)
+  ffmpeg: ffmpeg -hide_banner -benchmark -threads 1 -i X.264 -f null -   (utime, stime, rtime)
+7 interleaved rounds per clip. uptime before the run (a single pinned decode adds about 1.0):
+ 19:19:22 up 64 days,  5:14,  6 users,  load average: 1,10, 1,17, 1,01
+ 19:19:22 up 64 days,  5:14,  6 users,  load average: 1,10, 1,17, 1,01
+alien
+go=3.403 ff=bench: utime=0.932s stime=0.017s rtime=0.949s
+go=3.392 ff=bench: utime=0.930s stime=0.018s rtime=0.948s
+go=3.390 ff=bench: utime=0.935s stime=0.013s rtime=0.948s
+go=3.396 ff=bench: utime=0.933s stime=0.017s rtime=0.950s
+go=3.393 ff=bench: utime=0.943s stime=0.014s rtime=0.957s
+go=3.386 ff=bench: utime=0.933s stime=0.014s rtime=0.948s
+go=3.388 ff=bench: utime=0.937s stime=0.013s rtime=0.951s
+fade
+go=1.312 ff=bench: utime=0.307s stime=0.009s rtime=0.316s
+go=1.312 ff=bench: utime=0.300s stime=0.007s rtime=0.307s
+go=1.309 ff=bench: utime=0.302s stime=0.004s rtime=0.306s
+go=1.310 ff=bench: utime=0.300s stime=0.009s rtime=0.309s
+go=1.320 ff=bench: utime=0.296s stime=0.010s rtime=0.306s
+go=1.308 ff=bench: utime=0.302s stime=0.004s rtime=0.306s
+go=1.307 ff=bench: utime=0.303s stime=0.003s rtime=0.306s
+ 19:20:05 up 64 days,  5:15,  6 users,  load average: 1,57, 1,29, 1,06
+
+Profile without hashing (perf record -e cycles:u, perf report --no-children), top 30 per clip, same host; before it, "uptime" at 19:19:22 up 64 days, load average: 1,10 1,17 1,01 (the profile runs followed the timing run):
+== alien
+    12.57%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/cabac.(*Decoder).DecodeDecision
+     8.94%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/transform.Inverse8x8
+     4.37%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.motionSegments
+     3.64%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).neighbourMotion
+     3.55%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/transform.idct8x1D
+     2.53%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/simd.inverse4x4.abi0
+     2.52%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).storeMotion
+     2.36%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).runCABAC
+     2.20%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/loopfilter.edgeStrength
+     2.20%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/loopfilter.(*edgeContext).horizontalEdge
+     2.19%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/loopfilter.(*edgeContext).verticalEdge
+     2.18%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/cabac.(*Decoder).ResidualBlock8x8
+     2.08%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).startMB
+     1.91%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/deblock.kernelLuma
+     1.89%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).cabacResidual
+     1.77%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/loopfilter.motionDiffers
+     1.59%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/simd.bilinearChroma8x8.abi0
+     1.51%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/transform.Dequant8x8
+     1.40%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/cabac.(*Decoder).ResidualBlock
+     1.36%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/simd.bilinearChromaDispatch
+     1.35%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).cabacLuma8x8
+     1.32%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).colZero
+     1.26%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).spatialDirect
+     1.14%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).colocatedAt
+     1.12%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*mbGrid).motion
+     1.12%  clip_nh  clip_nh               [.] runtime.memclrNoHeapPointers
+     0.97%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/deblock.kernelChromaPair
+     0.91%  clip_nh  clip_nh               [.] github.com/go-videodsp/kernels/mc.checkLuma
+     0.88%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).addLuma8x8
+     0.83%  clip_nh  clip_nh               [.] github.com/go-videodsp/kernels/internal/bounds.Window
+== fade
+    10.92%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/transform.Inverse8x8
+     8.13%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/cabac.(*Decoder).DecodeDecision
+     5.10%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/simd.inverse4x4.abi0
+     4.85%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.motionSegments
+     3.10%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/transform.idct8x1D
+     3.04%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).runCABAC
+     2.80%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/loopfilter.(*edgeContext).horizontalEdge
+     2.44%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/loopfilter.(*edgeContext).verticalEdge
+     2.25%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/loopfilter.edgeStrength
+     2.23%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*mbGrid).motion
+     2.13%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).startMB
+     2.02%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/deblock.kernelLuma
+     1.89%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).neighbourMotion
+     1.79%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/loopfilter.motionDiffers
+     1.67%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/simd.bilinearChroma8x8.abi0
+     1.56%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/transform.Dequant8x8
+     1.50%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/pred.IntraChroma8x8
+     1.40%  clip_nh  clip_nh               [.] runtime.memclrNoHeapPointers
+     1.35%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/deblock.kernelChromaPair
+     1.33%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).addLuma8x8
+     1.33%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/simd.bilinearChromaDispatch
+     1.25%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).cabacResidual
+     1.20%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.dequant4x4
+     1.15%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).storeMotion
+     1.01%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/cabac.(*Decoder).ResidualBlock8x8
+     0.99%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/pred.Intra8x8
+     0.95%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*Decoder).takeMotion
+     0.93%  clip_nh  clip_nh               [.] github.com/go-videodsp/kernels/internal/bounds.Window
+     0.91%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/decoder.(*sliceDecoder).cabacLuma8x8
+     0.90%  clip_nh  clip_nh               [.] github.com/go-avkit/h264/internal/pred.Intra16x16
