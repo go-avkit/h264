@@ -248,8 +248,9 @@ const hvRows = 16 + 5
 
 // sixTapHVGeneric computes the centre half sample j of 8.4.2.2.1: the
 // horizontal six-tap filter is applied once to each of the h+5 rows the
-// vertical filter reaches (rows -2 .. h+2, unclipped, the b1 values), and the
-// vertical six-tap filter runs over those intermediates. Each intermediate is
+// vertical filter reaches (rows -2 .. h+2, unclipped, the b1 values of
+// equation 8-241), and the vertical six-tap filter runs over those
+// intermediates (equation 8-246). Each intermediate is
 // shared by the six outputs that need it, instead of being recomputed.
 func sixTapHVGeneric(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOff, w, h int) {
 	var stack [16 * hvRows]int32

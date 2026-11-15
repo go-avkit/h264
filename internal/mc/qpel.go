@@ -83,7 +83,7 @@ func quarterV(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOff, 
 
 // quarterHJ: f = (b + j + 1) >> 1 and q = (j + s + 1) >> 1 (8-254, 8-257). The
 // b1 / s1 intermediates (8-241) of the h+5 rows are filtered once; j1 is the
-// vertical filter over them (8-245) and b or s is read from the same rows.
+// vertical filter over them (8-246) and b or s is read from the same rows.
 func quarterHJ(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOff, w, h, yFrac int) {
 	var stack [qpelStack]int32
 	tmp := qpelScratch(&stack, w*(h+5))
@@ -117,7 +117,7 @@ func quarterHJ(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOff,
 
 // quarterVJ: i = (h + j + 1) >> 1 and k = (j + m + 1) >> 1 (8-255, 8-256). The
 // h1 / m1 intermediates (8-242) of the w+5 columns are filtered once; j1 is the
-// horizontal filter over them (8-246, equal to 8-245).
+// horizontal filter over them (8-245, equal to 8-246).
 func quarterVJ(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOff, w, h, xFrac int) {
 	var stack [qpelStack]int32
 	cols := w + 5
