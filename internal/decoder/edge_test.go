@@ -96,9 +96,25 @@ func TestEdgeEmulationMatchesAPaddedReference(t *testing.T) {
 			wantCb, wantCr := make([]byte, 7*8*8), make([]byte, 7*8*8)
 			mc.PredictChroma(wantCb, 8, 2, pad.Cb, pad.StrideC, pad.ChromaOffset(cx, cy), cw, ch, cmvx, cmvy)
 			mc.PredictChroma(wantCr, 8, 2, pad.Cr, pad.StrideC, pad.ChromaOffset(cx, cy), cw, ch, cmvx, cmvy)
-			predictChromaPair(ref, &emuC, gotCb, gotCr, 8, 2, cx, cy, cw, ch, cmvx, cmvy)
+			predictChromaPair(ref, &emuC, gotCb, gotCr, 8, 2, cx, cy, cw, ch, cmvx, cmvy, false)
 			if !bytes.Equal(wantCb, gotCb) || !bytes.Equal(wantCr, gotCr) {
 				t.Fatalf("%s chroma pair %dx%d at (%d,%d) mv (%d,%d): differs from the padded reference", name, cw, ch, cx, cy, cmvx, cmvy)
+			}
+			// averaged into samples already there (8-273): the second prediction of
+			// a bi-predicted block
+			initCb, initCr := make([]byte, 7*8*8), make([]byte, 7*8*8)
+			for i := range initCb {
+				initCb[i], initCr[i] = byte(rng.Intn(256)), byte(rng.Intn(256))
+			}
+			avgCb, avgCr := append([]byte(nil), initCb...), append([]byte(nil), initCr...)
+			predictChromaPair(ref, &emuC, avgCb, avgCr, 8, 2, cx, cy, cw, ch, cmvx, cmvy, true)
+			for y := 0; y < ch; y++ {
+				for x := 0; x < cw; x++ {
+					i := 2 + y*8 + x
+					if avgCb[i] != byte((int(initCb[i])+int(wantCb[i])+1)>>1) || avgCr[i] != byte((int(initCr[i])+int(wantCr[i])+1)>>1) {
+						t.Fatalf("%s chroma pair avg %dx%d at (%d,%d) mv (%d,%d): sample (%d,%d) differs", name, cw, ch, cx, cy, cmvx, cmvy, x, y)
+					}
+				}
 			}
 		}
 		if outside < 2000 || inside < 2000 {

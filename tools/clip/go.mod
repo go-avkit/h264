@@ -9,7 +9,7 @@ require (
 
 require (
 	github.com/go-avkit/bitstream v0.4.0 // indirect
-	github.com/go-videodsp/kernels v0.6.0 // indirect
+	github.com/go-videodsp/kernels v0.7.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 )
