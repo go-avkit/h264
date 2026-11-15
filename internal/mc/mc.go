@@ -42,6 +42,13 @@ func PredictLuma(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOf
 	xFrac := mvx & 3
 	yFrac := mvy & 3
 
+	// Without the amd64 kernels the quarter positions take the fused Go path
+	// (one store per sample); the kernels keep their two-pass shape.
+	if (xFrac|yFrac)&1 != 0 && !simd.Accelerated() {
+		predictQuarter(dst, dstStride, dstOff, src, srcStride, srcOff, w, h, xFrac, yFrac)
+		return
+	}
+
 	switch {
 	case xFrac == 0 && yFrac == 0:
 		copyBlock(dst, dstStride, dstOff, src, srcStride, srcOff, w, h)
