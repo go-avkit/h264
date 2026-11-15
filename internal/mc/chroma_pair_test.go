@@ -13,7 +13,9 @@ import (
 func TestPredictChromaPairMatchesPerPlane(t *testing.T) {
 	r := rand.New(rand.NewSource(41))
 	const stride = 20
-	for _, sz := range [][2]int{{8, 8}, {8, 4}, {4, 8}, {4, 4}, {4, 2}, {2, 2}} {
+	// 6 and 3 wide, 6 and 3 high: sizes a merged run of motion produces, which
+	// the kernels do not take
+	for _, sz := range [][2]int{{8, 8}, {8, 4}, {4, 8}, {4, 4}, {4, 2}, {2, 2}, {4, 6}, {6, 8}, {6, 6}, {8, 6}, {2, 6}, {3, 4}} {
 		w, h := sz[0], sz[1]
 		for mvx := -9; mvx < 9; mvx += 3 {
 			for mvy := -9; mvy < 9; mvy += 5 {
