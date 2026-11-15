@@ -111,25 +111,36 @@ func (d *Decoder) ResidualBlock(coeffs []int32, cat, condTermA, condTermB, numC8
 	maxNumCoeff := len(coeffs)
 	levelBase, levelLimit := absLevelBase(cat)
 
-	var significant [16]bool
-	numCoeff := maxNumCoeff
-	for i := 0; i < numCoeff-1; i++ {
-		sigInc := significanceInc(cat, i, numC8x8)
-		if d.DecodeDecision(offSignificant+catOffsetSignificant[cat]+sigInc) == 1 {
-			significant[i] = true
-			if d.DecodeDecision(offLastSignificant+catOffsetSignificant[cat]+sigInc) == 1 {
-				numCoeff = i + 1
+	// The significant positions are collected in order as the map is decoded, and
+	// the context offsets of the category are computed once, not per coefficient.
+	var pos [16]uint8
+	n := 0
+	last := false
+	sigBase := offSignificant + catOffsetSignificant[cat]
+	lastBase := offLastSignificant + catOffsetSignificant[cat]
+	for i := 0; i < maxNumCoeff-1; i++ {
+		sigInc := i
+		if cat == CatChromaDC {
+			sigInc = significanceInc(cat, i, numC8x8)
+		}
+		if d.DecodeDecision(sigBase+sigInc) == 1 {
+			pos[n] = uint8(i)
+			n++
+			if d.DecodeDecision(lastBase+sigInc) == 1 {
+				last = true
+				break
 			}
 		}
 	}
-	significant[numCoeff-1] = true
+	if !last { // the last coefficient is significant without being coded
+		pos[n] = uint8(maxNumCoeff - 1)
+		n++
+	}
 
 	numGt1, numEq1 := 0, 0
 	total := 0
-	for i := numCoeff - 1; i >= 0; i-- {
-		if !significant[i] {
-			continue
-		}
+	for k := n - 1; k >= 0; k-- {
+		i := pos[k]
 		level := d.boundedLevel(d.absLevelMinus1At(levelBase, levelLimit, numGt1, numEq1) + 1)
 		if level > 1 {
 			numGt1++
