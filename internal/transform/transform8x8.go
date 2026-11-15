@@ -80,7 +80,7 @@ func Forward8x8(b *Block8x8) {
 }
 
 // Inverse8x8 is the inverse 8x8 transform of 8.5.13 with the final
-// (x + 32) >> 6 (Equation 8-388). Two exact shortcuts for the sparse blocks that
+// (x + 32) >> 6 (Equation 8-406). Two exact shortcuts for the sparse blocks that
 // dominate real streams:
 //
 //   - only the DC coefficient is non-zero: every butterfly of the row pass
