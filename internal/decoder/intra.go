@@ -224,10 +224,7 @@ func (d *sliceDecoder) readLuma8x8(res *mbResidual, i8 int) error {
 }
 
 func (d *sliceDecoder) addLuma8x8(res *mbResidual, i8 int, off int, intra bool) {
-	b := &res.luma8x8[i8]
-	transform.Dequant8x8(b, d.qpY, d.scal.luma8x8(intra))
-	transform.Inverse8x8(b)
-	transform.AddResidual8x8(d.pic.Y, d.pic.StrideY, off, b)
+	transform.DequantInverse8x8Add(d.pic.Y, d.pic.StrideY, off, &res.luma8x8[i8], d.qpY, d.scal.luma8x8(intra))
 }
 
 func (d *sliceDecoder) readResidual(res *mbResidual, i16 bool) error {
