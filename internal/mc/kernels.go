@@ -24,7 +24,7 @@ func kernelSize(w, h int) bool {
 // elsewhere the portable code of this package, which on amd64 sits behind the
 // avo kernels of internal/simd. The caller proves the footprint lies in src.
 func PredictLuma(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOff int, w, h, mvx, mvy int) {
-	if kernelsLuma && kernelSize(w, h) {
+	if kernelsLuma && kernelSize(w, h) && !shares(dst, src) {
 		kmc.PutLuma(dst, dstOff, dstStride, src, srcOff+(mvy>>2)*srcStride+(mvx>>2), srcStride, w, h, mvx&3, mvy&3)
 		return
 	}
@@ -35,7 +35,7 @@ func PredictLuma(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOf
 // the second prediction of a bi-predicted block. Fused into the producer where
 // the kernels are used; otherwise a prediction block and the average.
 func PredictLumaAvg(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOff int, w, h, mvx, mvy int) {
-	if kernelsLuma && kernelSize(w, h) {
+	if kernelsLuma && kernelSize(w, h) && !shares(dst, src) {
 		kmc.AvgLuma(dst, dstOff, dstStride, src, srcOff+(mvy>>2)*srcStride+(mvx>>2), srcStride, w, h, mvx&3, mvy&3)
 		return
 	}

@@ -66,3 +66,48 @@ func TestPredictLumaOutsideTheKernelSizes(t *testing.T) {
 		}
 	}
 }
+
+// TestSharedBuffersTakeThePortablePath: the kernels panic when the destination
+// block and the source footprint share memory; PredictLuma and PredictLumaAvg
+// must not reach them then. The destination lies in the same array as the
+// reference, disjoint from the footprint (still the same backing array) and
+// overlapping it.
+func TestSharedBuffersTakeThePortablePath(t *testing.T) {
+	rng := rand.New(rand.NewSource(23))
+	const w, h = 8, 8
+	p := newPlane(w, h, lumaMargin, func(x, y int) int { return rng.Intn(256) })
+	for _, avg := range []bool{false, true} {
+		for yFrac := 0; yFrac < 4; yFrac++ {
+			for xFrac := 0; xFrac < 4; xFrac++ {
+				// A second plane copy: the destination is its tail, the source its head.
+				buf := append(append([]byte(nil), p.buf...), make([]byte, w*h)...)
+				tail := len(p.buf)
+				before := append([]byte(nil), buf[tail:]...)
+				if avg {
+					for i := range before {
+						before[i] = byte(rng.Intn(256))
+					}
+					copy(buf[tail:], before)
+					PredictLumaAvg(buf[tail:], w, 0, buf, p.stride, p.off(0, 0), w, h, xFrac, yFrac)
+				} else {
+					PredictLuma(buf[tail:], w, 0, buf, p.stride, p.off(0, 0), w, h, xFrac, yFrac)
+				}
+				for y := 0; y < h; y++ {
+					for x := 0; x < w; x++ {
+						want := refLumaVal(p.get, x, y, xFrac, yFrac)
+						if avg {
+							want = (int(before[y*w+x]) + want + 1) >> 1
+						}
+						if int(buf[tail+y*w+x]) != want {
+							t.Fatalf("avg=%v frac(%d,%d) (%d,%d): got %d, want %d", avg, xFrac, yFrac, x, y, buf[tail+y*w+x], want)
+						}
+					}
+				}
+				// Destination inside the source footprint: must not panic.
+				mix := append([]byte(nil), p.buf...)
+				PredictLuma(mix[p.off(0, 0):], p.stride, 0, mix, p.stride, p.off(0, 0), w, h, xFrac, yFrac)
+				PredictLumaAvg(mix[p.off(0, 0):], p.stride, 0, mix, p.stride, p.off(0, 0), w, h, xFrac, yFrac)
+			}
+		}
+	}
+}
