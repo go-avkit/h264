@@ -48,7 +48,10 @@ func (m *mbState) mv(list, blk int) [2]int16 {
 }
 
 func blockMotion(m *mbState, list, blk int) motion {
-	return motion{mv: m.mv(list, blk), ref: m.refIdx(list, blk)}
+	if list == 0 {
+		return motion{mv: m.MvL0[blk], ref: m.refIdxL0[blk]}
+	}
+	return motion{mv: m.MvL1[blk], ref: m.refIdxL1[blk]}
 }
 
 func (d *sliceDecoder) neighbourBlock(x, y, curZ int) (*mbState, int) {
