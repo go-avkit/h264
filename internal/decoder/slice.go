@@ -8,9 +8,15 @@ import (
 	"github.com/go-avkit/h264/internal/cabac"
 	"github.com/go-avkit/h264/internal/frame"
 	"github.com/go-avkit/h264/internal/loopfilter"
+	"github.com/go-avkit/h264/internal/transform"
 )
 
 type sliceDecoder struct {
+	// chromaBlocks holds the four AC blocks of one chroma plane in the shape the
+	// kernels take (sixteen blocks, four used); a local array would be zeroed
+	// on every call.
+	chromaBlocks [16]transform.Block
+
 	r    *bits.Reader
 	sps  *h264.SPS
 	pps  *h264.PPS
