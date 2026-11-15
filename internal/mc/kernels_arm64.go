@@ -2,6 +2,9 @@
 
 package mc
 
-// kernelsLuma routes luma prediction through go-videodsp/kernels, whose arm64
-// implementation is NEON.
-const kernelsLuma = true
+// kernelsLuma routes luma prediction, and kernelsWeight explicit weighted
+// prediction, through go-videodsp/kernels, whose arm64 implementation is NEON.
+const (
+	kernelsLuma   = true
+	kernelsWeight = true
+)

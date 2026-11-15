@@ -165,7 +165,7 @@ func WeightUni(dst []byte, stride, off, w, h, weight, offset, logWD int) {
 	if offset == 0 && weight == 1<<uint(logWD) {
 		return
 	}
-	if kernelsLuma && kernelSize(w, h) && weightsInRange(logWD, weight, offset) {
+	if kernelsWeight && kernelSize(w, h) && weightsInRange(logWD, weight, offset) {
 		kmc.WeightUni(dst, off, stride, w, h, weight, offset, logWD)
 		return
 	}
@@ -201,7 +201,7 @@ func WeightBi(dst []byte, dstStride, dstOff int, a []byte, aStride, aOff int, b 
 		Average(dst, dstStride, dstOff, a, aStride, aOff, b, bStride, bOff, w, h)
 		return
 	}
-	if kernelsLuma && kernelSize(w, h) && weightsInRange(logWD, w0, o0) && weightsInRange(logWD, w1, o1) && !shares(dst, b) {
+	if kernelsWeight && kernelSize(w, h) && weightsInRange(logWD, w0, o0) && weightsInRange(logWD, w1, o1) && !shares(dst, b) {
 		// The kernel combines the second prediction into the first in place.
 		if &dst[dstOff] != &a[aOff] || dstStride != aStride {
 			simd.CopyBlock(dst, dstStride, dstOff, a, aStride, aOff, w, h)
