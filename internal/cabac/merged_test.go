@@ -22,11 +22,11 @@ func TestMergedTablesAreTheSpecsTables(t *testing.T) {
 		for mps := 0; mps < 2; mps++ {
 			s := state<<1 | mps
 			for q := 0; q < 4; q++ {
-				if mergedLPS[s][q] != rangeTabLPS[state][q] {
-					t.Fatalf("state %d mps %d q %d: LPS range %d, table %d", state, mps, q, mergedLPS[s][q], rangeTabLPS[state][q])
+				if mergedLPS[s][q] != specRangeTabLPS[state][q] {
+					t.Fatalf("state %d mps %d q %d: LPS range %d, table %d", state, mps, q, mergedLPS[s][q], specRangeTabLPS[state][q])
 				}
 			}
-			wantMPS := int(transIdxMPS[state])<<1 | mps
+			wantMPS := int(specTransIdxMPS[state])<<1 | mps
 			if int(mergedNextMPS[s]) != wantMPS {
 				t.Fatalf("state %d mps %d: next after MPS %d, want %d", state, mps, mergedNextMPS[s], wantMPS)
 			}
@@ -34,7 +34,7 @@ func TestMergedTablesAreTheSpecsTables(t *testing.T) {
 			if state == 0 {
 				nm = 1 - mps
 			}
-			wantLPS := int(transIdxLPS[state])<<1 | nm
+			wantLPS := int(specTransIdxLPS[state])<<1 | nm
 			if int(mergedNextLPS[s]) != wantLPS {
 				t.Fatalf("state %d mps %d: next after LPS %d, want %d", state, mps, mergedNextLPS[s], wantLPS)
 			}

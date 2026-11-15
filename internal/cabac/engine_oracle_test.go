@@ -36,7 +36,7 @@ func (o *oracle) renorm() {
 
 func (o *oracle) decision(i int) uint32 {
 	c := &o.ctx[i]
-	lps := uint32(rangeTabLPS[c.state][o.rng>>6&3])
+	lps := uint32(specRangeTabLPS[c.state][o.rng>>6&3]) // the independent transcription, not the engine's table
 	o.rng -= lps
 	var bin uint32
 	if o.off >= o.rng {
@@ -46,10 +46,10 @@ func (o *oracle) decision(i int) uint32 {
 		if c.state == 0 {
 			c.mps = 1 - c.mps
 		}
-		c.state = transIdxLPS[c.state]
+		c.state = specTransIdxLPS[c.state]
 	} else {
 		bin = uint32(c.mps)
-		c.state = transIdxMPS[c.state]
+		c.state = specTransIdxMPS[c.state]
 	}
 	o.renorm()
 	return bin

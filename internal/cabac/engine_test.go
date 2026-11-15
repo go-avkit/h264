@@ -61,7 +61,7 @@ func (e *refEncoder) renorm() {
 func (e *refEncoder) encodeDecision(ctxIdx int, bin uint32) {
 	c := &e.ctx[ctxIdx]
 	q := e.rng >> 6 & 3
-	lps := uint32(rangeTabLPS[c.state][q])
+	lps := uint32(specRangeTabLPS[c.state][q])
 	e.rng -= lps
 	if bin != uint32(c.mps) {
 		e.low += e.rng
@@ -69,9 +69,9 @@ func (e *refEncoder) encodeDecision(ctxIdx int, bin uint32) {
 		if c.state == 0 {
 			c.mps = 1 - c.mps
 		}
-		c.state = transIdxLPS[c.state]
+		c.state = specTransIdxLPS[c.state]
 	} else {
-		c.state = transIdxMPS[c.state]
+		c.state = specTransIdxMPS[c.state]
 	}
 	e.renorm()
 }
