@@ -13,26 +13,42 @@ const (
 	emuChromaSide = 8 + chromaTapAfter
 )
 
-// predictLumaBlock predicts a w x h luma block at (x, y) displaced by the
+// predictLumaBlockAvg predicts a w x h luma block at (x, y) displaced by the
 // quarter-sample vector (mvx, mvy) from ref. While the footprint of the filter
 // lies inside the picture the reference is read in place; otherwise the
 // footprint is rebuilt with the coordinates clamped into the picture (8-239,
 // 8-240) and predicted from that copy, so the reference needs no padded border.
-func predictLumaBlock(ref *frame.Picture, dst []byte, dstStride, dstOff, x, y, w, h, mvx, mvy int) {
+//
+// emu is the room for the rebuilt footprint. It belongs to the caller because
+// the kernels keep their slices alive for escape analysis, which would move a
+// local array to the heap on every call.
+//
+// With avg the prediction is averaged into the samples already in dst,
+// (dst + p + 1) >> 1 (8-273), the second prediction of a bi-predicted block,
+// instead of replacing them.
+func predictLumaBlockAvg(ref *frame.Picture, emu *[emuLumaSide * emuLumaSide]byte, dst []byte, dstStride, dstOff, x, y, w, h, mvx, mvy int, avg bool) {
 	lx, ly := x+mvx>>2, y+mvy>>2
 	if lx-lumaTapBefore >= 0 && lx+w+lumaTapAfter <= ref.Width &&
 		ly-lumaTapBefore >= 0 && ly+h+lumaTapAfter <= ref.Height {
-		mc.PredictLuma(dst, dstStride, dstOff, ref.Y, ref.StrideY, ref.LumaOffset(x, y), w, h, mvx, mvy)
+		if avg {
+			mc.PredictLumaAvg(dst, dstStride, dstOff, ref.Y, ref.StrideY, ref.LumaOffset(x, y), w, h, mvx, mvy)
+		} else {
+			mc.PredictLuma(dst, dstStride, dstOff, ref.Y, ref.StrideY, ref.LumaOffset(x, y), w, h, mvx, mvy)
+		}
 		return
 	}
-	var emu [emuLumaSide * emuLumaSide]byte
 	mc.EmulateEdge(emu[:], emuLumaSide, ref.Y, ref.StrideY, ref.OriginY(), ref.Width, ref.Height,
 		lx-lumaTapBefore, ly-lumaTapBefore, w+lumaTapBefore+lumaTapAfter, h+lumaTapBefore+lumaTapAfter)
+	if avg {
+		mc.PredictLumaAvg(dst, dstStride, dstOff, emu[:], emuLumaSide, lumaTapBefore*emuLumaSide+lumaTapBefore,
+			w, h, mvx&3, mvy&3)
+		return
+	}
 	mc.PredictLuma(dst, dstStride, dstOff, emu[:], emuLumaSide, lumaTapBefore*emuLumaSide+lumaTapBefore,
 		w, h, mvx&3, mvy&3)
 }
 
-// predictChromaBlock is predictLumaBlock for one chroma plane of ref (src, with
+// predictChromaBlock is predictLumaBlockAvg for one chroma plane of ref (src, with
 // the picture's chroma stride and origin), at chroma position (cx, cy) and the
 // eighth-sample vector (cmvx, cmvy).
 func predictChromaBlock(ref *frame.Picture, src []byte, dst []byte, dstStride, dstOff, cx, cy, cw, ch, cmvx, cmvy int) {

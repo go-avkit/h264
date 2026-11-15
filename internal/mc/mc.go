@@ -37,7 +37,7 @@ func averageBlocks(dst []byte, dstStride, dstOff int, a []byte, b []byte, w, h i
 	}
 }
 
-func PredictLuma(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOff int, w, h, mvx, mvy int) {
+func predictLumaPortable(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOff int, w, h, mvx, mvy int) {
 	srcOff += (mvy>>2)*srcStride + (mvx >> 2)
 	xFrac := mvx & 3
 	yFrac := mvy & 3
