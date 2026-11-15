@@ -1,0 +1,51 @@
+go-avkit/h264, amd64 AVX2 routing through go-videodsp/kernels, AMD Ryzen 9 7950X (Zen 4).
+One core (GOMAXPROCS=1, taskset -c 9), whole decode of a 1080p clip, seconds per decode,
+interleaved rounds. The "load" column is /proc/loadavg (1 minute) read before each round:
+a single pinned decode adds about 1.0 to it by itself, so a floor of about 1.0 is the
+decode, and the rest (up to 1.46) is another session on the host. The rule is 1.0: these
+runs are not under it; the arms are interleaved in each round so they share the load.
+Arms (a temporary H264_KERNELS_OFF switch, not in the code): all-on = every stage on the
+kernels; no-luma / no-weight / no-lf = that stage back on the avo kernels of internal/simd;
+all-off = all stages on avo (what main does on amd64).
+alien: 240 frames, 7 rounds; fade: 120 frames with explicit weights, 7 rounds.
+
+ 18:27:33 up 64 days,  4:23,  5 users,  load average: 1,09, 0,94, 0,72
+clip alien
+round load all-on no-luma no-weight no-lf all-off
+1 1.09 4.598 4.648 4.460 4.492 4.718
+2 1.06 4.424 4.634 4.477 4.480 4.718
+3 1.04 4.424 4.643 4.468 4.487 4.719
+4 1.03 4.423 4.650 4.472 4.472 4.721
+5 1.02 4.431 4.637 4.473 4.489 4.748
+6 1.09 4.484 4.767 4.567 4.612 4.820
+7 1.06 4.543 4.662 4.579 4.608 4.856
+clip fade
+round load all-on no-luma no-weight no-lf all-off
+1 1.12 1.867 1.968 2.028 1.920 2.172
+2 1.10 1.880 1.991 2.014 1.911 2.180
+3 1.09 1.869 1.977 2.033 1.929 2.147
+4 1.07 1.846 1.972 2.142 1.908 2.120
+5 1.14 1.848 1.930 1.976 1.899 2.117
+6 1.36 1.834 1.924 1.981 1.879 2.118
+7 1.46 1.841 1.935 1.985 1.879 2.112
+ 18:31:27 up 64 days,  4:26,  6 users,  load average: 1,54, 1,13, 0,84
+
+Old main (avo) against this branch, same clips, 7 interleaved rounds, load 0.55 to 0.96 (uptime before and after):
+ 17:20:11 up 64 days,  3:15,  5 users,  load average: 0,55, 0,61, 0,47
+alien
+1 old=4.833 new=4.429
+2 old=4.707 new=4.452
+3 old=4.727 new=4.444
+4 old=4.731 new=4.438
+5 old=4.727 new=4.452
+6 old=4.712 new=4.444
+7 old=4.730 new=4.436
+fade
+1 old=2.117 new=1.851
+2 old=2.115 new=1.847
+3 old=2.115 new=1.860
+4 old=2.127 new=1.859
+5 old=2.118 new=1.858
+6 old=2.124 new=1.846
+7 old=2.117 new=1.848
+ 17:21:45 up 64 days,  3:17,  5 users,  load average: 0,96, 0,74, 0,54
