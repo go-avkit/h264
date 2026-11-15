@@ -16,3 +16,39 @@ func DequantInverse8x8Add(plane []byte, stride, offset int, b *Block8x8, qp int,
 	Inverse8x8(b)
 	AddResidual8x8(plane, stride, offset, b)
 }
+
+// KernelsITX reports whether the transforms run through go-videodsp/kernels.
+func KernelsITX() bool { return kernelsITX }
+
+// DequantInverse4x4AddBlocks is itx.Dequant4x4IDCTAddBlocks: the blocks of a
+// 16x16 (n = 16) or 8x8 (n = 4) region selected by mask, scaled with scale
+// (the row for qP % 6), transformed and added to plane in one call. Only
+// valid where KernelsITX is true.
+func DequantInverse4x4AddBlocks(plane []byte, stride, offset, n int, blocks *[16]Block, mask uint16, scale *[16]int32, qpDiv int, skipDC bool) {
+	itx.Dequant4x4IDCTAddBlocks(plane, offset, stride, n, blocks, mask, scale, qpDiv, skipDC)
+}
+
+// LumaDCDequant is the luma DC transform and scaling of an Intra16x16
+// macroblock (8.5.10), ls0 being the first entry of the scale for qP % 6:
+// the kernel where there is one, the Hadamard transform and the scaling
+// otherwise.
+func LumaDCDequant(b *Block, qp int, ls0 int32) {
+	if kernelsITX && qp >= 0 {
+		itx.LumaDCDequant(b, ls0, qp/6)
+		return
+	}
+	Hadamard4x4(b)
+	shift := qp / 6
+	if shift >= 6 {
+		s := uint(shift - 6)
+		for i := range b {
+			b[i] = b[i] * ls0 << s
+		}
+		return
+	}
+	s := uint(6 - shift)
+	round := int32(1) << (s - 1)
+	for i := range b {
+		b[i] = (b[i]*ls0 + round) >> s
+	}
+}

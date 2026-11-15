@@ -2,7 +2,9 @@ package transform
 
 import "github.com/go-avkit/h264/internal/simd"
 
-type Block [16]int32
+// Block is an alias, not a type of its own: an array of blocks is then the
+// [16][16]int32 the kernels of go-videodsp/kernels take.
+type Block = [16]int32
 
 type ChromaDC [4]int32
 

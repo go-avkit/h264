@@ -5,7 +5,6 @@ import (
 
 	"github.com/go-avkit/h264/internal/frame"
 	"github.com/go-avkit/h264/internal/mc"
-	"github.com/go-avkit/h264/internal/transform"
 )
 
 type subMbInfo struct {
@@ -534,14 +533,12 @@ func (d *sliceDecoder) addInterResidual(res *mbResidual) {
 		d.addChromaResidual(res)
 		return
 	}
+	var mask uint16
 	for blk := 0; blk < 16; blk++ {
-		if d.cur.NzY[blk] == 0 {
-			continue
+		if d.cur.NzY[blk] != 0 {
+			mask |= 1 << uint(blk)
 		}
-		dequant4x4(&res.luma[blk], d.qpY, d.scal.luma4x4(false), false)
-		transform.Inverse4x4(&res.luma[blk])
-		transform.AddResidual4x4(d.pic.Y, d.pic.StrideY,
-			d.pic.LumaOffset(baseX+blockX[blk], baseY+blockY[blk]), &res.luma[blk])
 	}
+	addBlocks4x4(d.pic.Y, d.pic.StrideY, d.pic.LumaOffset(baseX, baseY), 16, &res.luma, mask, d.qpY, d.scal.luma4x4(false), false)
 	d.addChromaResidual(res)
 }

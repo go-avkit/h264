@@ -287,9 +287,7 @@ func (d *sliceDecoder) reconstructIntra4x4(res *mbResidual) {
 		if d.cur.NzY[blk] == 0 {
 			continue
 		}
-		dequant4x4(&res.luma[blk], d.qpY, d.scal.luma4x4(true), false)
-		transform.Inverse4x4(&res.luma[blk])
-		transform.AddResidual4x4(d.pic.Y, d.pic.StrideY, off, &res.luma[blk])
+		addBlocks4x4(d.pic.Y, d.pic.StrideY, d.pic.LumaOffset(baseX, baseY), 16, &res.luma, 1<<uint(blk), d.qpY, d.scal.luma4x4(true), false)
 	}
 }
 
@@ -317,11 +315,8 @@ func (d *sliceDecoder) reconstructIntra16x16(res *mbResidual) {
 	for blk := 0; blk < 16; blk++ {
 		dcIdx := (blockY[blk]>>2)*4 + blockX[blk]>>2
 		res.luma[blk][0] = res.lumaDC[dcIdx]
-		dequant4x4(&res.luma[blk], d.qpY, scale, true)
-		transform.Inverse4x4(&res.luma[blk])
-		transform.AddResidual4x4(d.pic.Y, d.pic.StrideY,
-			d.pic.LumaOffset(baseX+blockX[blk], baseY+blockY[blk]), &res.luma[blk])
 	}
+	addBlocks4x4(d.pic.Y, d.pic.StrideY, off, 16, &res.luma, 0xffff, d.qpY, scale, true)
 }
 
 func (d *sliceDecoder) reconstructChroma(res *mbResidual) {
@@ -340,6 +335,7 @@ func (d *sliceDecoder) addChromaResidual(res *mbResidual) {
 		return
 	}
 	baseX, baseY := d.mbx*8, d.mby*8
+	off := d.pic.ChromaOffset(baseX, baseY)
 	planes := [2][]byte{d.pic.Cb, d.pic.Cr}
 	offsets := [2]int32{d.pps.ChromaQPIndexOffset, d.pps.SecondChromaQPOffset}
 	for plane := 0; plane < 2; plane++ {
@@ -347,13 +343,11 @@ func (d *sliceDecoder) addChromaResidual(res *mbResidual) {
 		scale := d.scal.chroma4x4(d.cur.Intra, plane)
 		dequantChromaDC(&res.chromaDC[plane], qpc, scale)
 		for blk := 0; blk < 4; blk++ {
-			b := &res.chromaAC[plane][blk]
-			b[0] = res.chromaDC[plane][blk]
-			dequant4x4(b, qpc, scale, true)
-			transform.Inverse4x4(b)
-			transform.AddResidual4x4(planes[plane], d.pic.StrideC,
-				d.pic.ChromaOffset(baseX+chromaBlockX[blk], baseY+chromaBlockY[blk]), b)
+			res.chromaAC[plane][blk][0] = res.chromaDC[plane][blk]
 		}
+		var blocks [16]transform.Block
+		copy(blocks[:4], res.chromaAC[plane][:])
+		addBlocks4x4(planes[plane], d.pic.StrideC, off, 4, &blocks, 0xf, qpc, scale, true)
 	}
 }
 

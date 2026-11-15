@@ -119,20 +119,27 @@ func dequant4x4(b *transform.Block, qp int, scale *levelScale4x4, skipDC bool) {
 }
 
 func dequantLumaDC(b *transform.Block, qp int, scale *levelScale4x4) {
-	transform.Hadamard4x4(b)
-	v := scale[qp%6][0]
-	shift := qp / 6
-	if shift >= 6 {
-		s := uint(shift - 6)
-		for i := range b {
-			b[i] = b[i] * v << s
-		}
+	transform.LumaDCDequant(b, qp, scale[qp%6][0])
+}
+
+// addBlocks4x4 scales, transforms and adds the 4x4 blocks selected by mask to
+// the plane (n is 16 for the blocks of a 16x16 region, 4 for those of an 8x8
+// one; block b sits at blockX[b], blockY[b] from offset, the z-scan placement
+// of both). With the kernels it is one call; the scalar fallback runs the
+// three stages per block.
+func addBlocks4x4(plane []byte, stride, offset, n int, blocks *[16]transform.Block, mask uint16, qp int, scale *levelScale4x4, skipDC bool) {
+	mask &= 1<<uint(n) - 1
+	if transform.KernelsITX() && qp >= 0 {
+		transform.DequantInverse4x4AddBlocks(plane, stride, offset, n, blocks, mask, &scale[qp%6], qp/6, skipDC)
 		return
 	}
-	s := uint(6 - shift)
-	round := int32(1) << (s - 1)
-	for i := range b {
-		b[i] = (b[i]*v + round) >> s
+	for b := 0; b < n; b++ {
+		if mask>>uint(b)&1 == 0 {
+			continue
+		}
+		dequant4x4(&blocks[b], qp, scale, skipDC)
+		transform.Inverse4x4(&blocks[b])
+		transform.AddResidual4x4(plane, stride, offset+blockY[b]*stride+blockX[b], &blocks[b])
 	}
 }
 
