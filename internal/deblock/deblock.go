@@ -162,6 +162,9 @@ func filterEdge(plane []byte, offset, lineStep, sampleStep, numLines, groupSize 
 }
 
 func FilterLumaEdgeVertical(plane []byte, stride, offset int, bS [4]uint8, indexA, indexB int) {
+	if kernelsLF && kernelLuma(plane, stride, offset, bS, indexA, indexB, true) {
+		return
+	}
 	if acceleratedLumaEdgeVertical(plane, offset, stride, bS, indexA, indexB) {
 		return
 	}
@@ -224,6 +227,9 @@ func edgeStrengths(bS [4]uint8, indexA int) (tc0, bs [16]uint8, kind edgeKind) {
 }
 
 func FilterLumaEdgeHorizontal(plane []byte, stride, offset int, bS [4]uint8, indexA, indexB int) {
+	if kernelsLF && kernelLuma(plane, stride, offset, bS, indexA, indexB, false) {
+		return
+	}
 	if acceleratedLumaEdge(plane, offset, stride, bS, indexA, indexB) {
 		return
 	}
@@ -249,9 +255,15 @@ func acceleratedLumaEdge(plane []byte, offset, stride int, bS [4]uint8, indexA, 
 }
 
 func FilterChromaEdgeVertical(plane []byte, stride, offset int, bS [4]uint8, indexA, indexB int) {
+	if kernelsLF && kernelChroma(plane, stride, offset, bS, indexA, indexB, true) {
+		return
+	}
 	filterEdge(plane, offset, stride, 1, 8, 2, bS, indexA, indexB, true)
 }
 
 func FilterChromaEdgeHorizontal(plane []byte, stride, offset int, bS [4]uint8, indexA, indexB int) {
+	if kernelsLF && kernelChroma(plane, stride, offset, bS, indexA, indexB, false) {
+		return
+	}
 	filterEdge(plane, offset, 1, stride, 8, 2, bS, indexA, indexB, true)
 }

@@ -1,6 +1,7 @@
 package mc
 
 import (
+	"bytes"
 	"math/rand"
 	"testing"
 )
@@ -103,10 +104,39 @@ func TestSharedBuffersTakeThePortablePath(t *testing.T) {
 						}
 					}
 				}
-				// Destination inside the source footprint: must not panic.
+				// Destination inside the source footprint: the result must be
+				// the portable path's on the same memory, asserted on the
+				// samples (a missing guard also panics in the kernel, but the
+				// guard is tested by what it chooses, not by the panic).
 				mix := append([]byte(nil), p.buf...)
+				ref := append([]byte(nil), p.buf...)
+				// The decision itself: overlapping memory never takes the
+				// kernels; the disjoint arrays above do wherever they exist.
+				if useLumaKernel(mix[p.off(0, 0):], mix, w, h) {
+					t.Fatalf("frac(%d,%d): useLumaKernel chose the kernels for a destination inside the source array", xFrac, yFrac)
+				}
+				if got, want := useLumaKernel(buf[tail:], p.buf, w, h), kernelsLuma; got != want {
+					t.Fatalf("frac(%d,%d): useLumaKernel(disjoint arrays) = %v, want %v (kernelsLuma)", xFrac, yFrac, got, want)
+				}
+				// A panic from the kernel is reported as a failure too, in
+				// addition to the assertions above and below, not instead.
+				defer func() {
+					if r := recover(); r != nil {
+						t.Fatalf("frac(%d,%d): overlapping memory reached a kernel: %v", xFrac, yFrac, r)
+					}
+				}()
 				PredictLuma(mix[p.off(0, 0):], p.stride, 0, mix, p.stride, p.off(0, 0), w, h, xFrac, yFrac)
+				predictLumaPortable(ref[p.off(0, 0):], p.stride, 0, ref, p.stride, p.off(0, 0), w, h, xFrac, yFrac)
+				if !bytes.Equal(mix, ref) {
+					t.Fatalf("PredictLuma frac(%d,%d) on overlapping memory differs from the portable path", xFrac, yFrac)
+				}
 				PredictLumaAvg(mix[p.off(0, 0):], p.stride, 0, mix, p.stride, p.off(0, 0), w, h, xFrac, yFrac)
+				var tmp [256]byte
+				predictLumaPortable(tmp[:w*h], w, 0, ref, p.stride, p.off(0, 0), w, h, xFrac, yFrac)
+				Average(ref[p.off(0, 0):], p.stride, 0, ref[p.off(0, 0):], p.stride, 0, tmp[:w*h], w, 0, w, h)
+				if !bytes.Equal(mix, ref) {
+					t.Fatalf("PredictLumaAvg frac(%d,%d) on overlapping memory differs from the portable path", xFrac, yFrac)
+				}
 			}
 		}
 	}
