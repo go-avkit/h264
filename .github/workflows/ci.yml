@@ -53,7 +53,7 @@ jobs:
       - name: Test the tools module
         working-directory: tools
         run: go vet ./... && go test -race ./...
-      - name: Test the clip tool (its own module: it replaces the root module)
+      - name: Test the clip tool (its own module, which replaces the root module)
         working-directory: tools/clip
         run: go vet ./... && go test -race ./...
       - name: Test + 100% coverage gate
