@@ -162,7 +162,17 @@ func (d *sliceDecoder) temporalDirect(x, y, w, h int) {
 	}
 }
 
+// DirectCensus, when set (by the conformance test), is called for every direct
+// derivation with whether it is spatial, whether direct_8x8_inference_flag is
+// set, and the area it covers in luma samples (256 per macroblock): it counts
+// which direct paths a stream exercises. A nil check on a package variable is
+// the whole cost when it is not set.
+var DirectCensus func(spatial, direct8x8 bool, area int)
+
 func (d *sliceDecoder) directMotion(x, y, w, h int) {
+	if DirectCensus != nil {
+		DirectCensus(d.directSpatial, d.direct8x8, w*h)
+	}
 	if d.directSpatial {
 		d.spatialDirect(x, y, w, h)
 		return
