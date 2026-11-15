@@ -244,20 +244,42 @@ func sixTapVertGeneric(dst []byte, dstStride, dstOff int, src []byte, srcStride,
 	}
 }
 
+// hvRows is the most rows of intermediates the centre position needs for a
+// block of the largest height H.264 predicts (16 + 5).
+const hvRows = 16 + 5
+
+// sixTapHVGeneric computes the centre half sample j of 8.4.2.2.1: the
+// horizontal six-tap filter is applied once to each of the h+5 rows the
+// vertical filter reaches (rows -2 .. h+2, unclipped, the b1 values), and the
+// vertical six-tap filter runs over those intermediates. Each intermediate is
+// shared by the six outputs that need it, instead of being recomputed.
 func sixTapHVGeneric(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOff, w, h int) {
+	var stack [16 * hvRows]int32
+	tmp := stack[:]
+	n := w * (h + 5)
+	if n > len(tmp) {
+		tmp = make([]int32, n)
+	}
+	tmp = tmp[:n]
+	for r := 0; r < h+5; r++ {
+		so := srcOff + (r-2)*srcStride
+		row := tmp[r*w : r*w+w]
+		for x := range row {
+			row[x] = int32(hFilter1(src, so+x))
+		}
+	}
 	for y := 0; y < h; y++ {
-		so := srcOff + y*srcStride
 		do := dstOff + y*dstStride
-		for x := 0; x < w; x++ {
-			xo := so + x
-			cc := hFilter1(src, xo-2*srcStride)
-			dd := hFilter1(src, xo-srcStride)
-			h1 := hFilter1(src, xo)
-			m1 := hFilter1(src, xo+srcStride)
-			ee := hFilter1(src, xo+2*srcStride)
-			ff := hFilter1(src, xo+3*srcStride)
-			j1 := cc - 5*dd + 20*h1 + 20*m1 - 5*ee + ff
-			dst[do+x] = mcClip1((j1 + 512) >> 10)
+		out := dst[do : do+w]
+		r0 := tmp[y*w : y*w+w]
+		r1 := tmp[(y+1)*w : (y+1)*w+w]
+		r2 := tmp[(y+2)*w : (y+2)*w+w]
+		r3 := tmp[(y+3)*w : (y+3)*w+w]
+		r4 := tmp[(y+4)*w : (y+4)*w+w]
+		r5 := tmp[(y+5)*w : (y+5)*w+w]
+		for x := range out {
+			j1 := int(r0[x]) - 5*int(r1[x]) + 20*int(r2[x]) + 20*int(r3[x]) - 5*int(r4[x]) + int(r5[x])
+			out[x] = mcClip1((j1 + 512) >> 10)
 		}
 	}
 }
