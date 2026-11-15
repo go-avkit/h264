@@ -23,6 +23,17 @@ func randomMB(r *rand.Rand, refs []*frame.Picture) *MB {
 			m.MvL1[i][c] = int16(r.Intn(9) - 4)
 		}
 	}
+	// half of the quadrants carry one prediction, as a partition does
+	for q := 0; q < 4; q++ {
+		if r.Intn(2) == 0 {
+			continue
+		}
+		b := q * 4
+		for i := 1; i < 4; i++ {
+			m.RefPicL0[b+i], m.MvL0[b+i] = m.RefPicL0[b], m.MvL0[b]
+			m.RefPicL1[b+i], m.MvL1[b+i] = m.RefPicL1[b], m.MvL1[b]
+		}
+	}
 	return m
 }
 
@@ -35,7 +46,7 @@ func TestEdgeStrengthsMatchesPerGroup(t *testing.T) {
 	refs := []*frame.Picture{nil, {}, {}}
 	for n := 0; n < 20000; n++ {
 		cur, nb := randomMB(r, refs), randomMB(r, refs)
-		cnz, nnz := nzMask(cur), nzMask(nb)
+		cnz, nnz, uni := nzMask(cur), nzMask(nb), quadUniform(cur)
 		for e := 0; e < 4; e++ {
 			for dir := 0; dir < 2; dir++ {
 				p, pnz, pr := cur, cnz, e-1
@@ -45,9 +56,9 @@ func TestEdgeStrengthsMatchesPerGroup(t *testing.T) {
 				var got [4]uint8
 				var any bool
 				if dir == 0 {
-					got, any = edgeStrengths(p, cur, pnz, cnz, pr, e, 4, e == 0)
+					got, any = edgeStrengths(p, cur, pnz, cnz, uni, pr, e, 4, e == 0, e&1 != 0)
 				} else {
-					got, any = edgeStrengths(p, cur, pnz, cnz, pr*4, e*4, 1, e == 0)
+					got, any = edgeStrengths(p, cur, pnz, cnz, uni, pr*4, e*4, 1, e == 0, e&1 != 0)
 				}
 				var want [4]uint8
 				wantAny := false

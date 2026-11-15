@@ -129,11 +129,35 @@ func gather(w uint64) uint64 {
 	return (t >> 7) * 0x0102040810204080 >> 56
 }
 
+// rasterQuad maps a raster position to its 8x8 quadrant.
+var rasterQuad = [16]uint8{0, 0, 1, 1, 0, 0, 1, 1, 2, 2, 3, 3, 2, 2, 3, 3}
+
+// quadUniform sets bit q when the four blocks of 8x8 quadrant q carry the
+// same prediction (what motionDiffers compares). Quadrant q holds blocks 4q..4q+3.
+func quadUniform(m *MB) uint8 {
+	var u uint8
+	for q := 0; q < 4; q++ {
+		b := q * 4
+		same := true
+		for i := 1; i < 4; i++ {
+			if m.RefPicL0[b+i] != m.RefPicL0[b] || m.MvL0[b+i] != m.MvL0[b] ||
+				m.Bipredictive && (m.RefPicL1[b+i] != m.RefPicL1[b] || m.MvL1[b+i] != m.MvL1[b]) {
+				same = false
+				break
+			}
+		}
+		if same {
+			u |= 1 << uint(q)
+		}
+	}
+	return u
+}
+
 // edgeStrengths is edgeStrength for the four 4-sample groups of one edge. The
 // groups run along the edge: pr and qr are the raster positions of the first
 // group's blocks on each side and step moves to the next group. It returns
 // the same four values as four calls of edgeStrength.
-func edgeStrengths(p, q *MB, pnz, qnz uint16, pr, qr, step int, mbEdge bool) (bs [4]uint8, any bool) {
+func edgeStrengths(p, q *MB, pnz, qnz uint16, uni uint8, pr, qr, step int, mbEdge, inside bool) (bs [4]uint8, any bool) {
 	if p.Intra || q.Intra {
 		v := uint8(3)
 		if mbEdge {
@@ -147,6 +171,8 @@ func edgeStrengths(p, q *MB, pnz, qnz uint16, pr, qr, step int, mbEdge bool) (bs
 		case pnz>>uint(rasterBlk[pi])&1|qnz>>uint(rasterBlk[qi])&1 != 0:
 			bs[g] = 2
 			any = true
+		case inside && uni>>uint(rasterQuad[qi])&1 != 0:
+			// both blocks lie in one 8x8 quadrant of uniform motion
 		case motionDiffers(p, q, rasterBlk[pi], rasterBlk[qi]):
 			bs[g] = 1
 			any = true
@@ -203,6 +229,10 @@ func (c *edgeContext) filterMB(mbx, mby int) {
 		last = 1
 	}
 	cnz := nzMask(cur)
+	var uni uint8
+	if !cur.Intra && last > 1 && step == 1 {
+		uni = quadUniform(cur)
+	}
 	var lnz, tnz uint16
 	if left != nil {
 		lnz = nzMask(left)
@@ -211,10 +241,10 @@ func (c *edgeContext) filterMB(mbx, mby int) {
 		tnz = nzMask(top)
 	}
 	for e := 0; e < last; e += step {
-		c.verticalEdge(cur, left, mbx, mby, e, cnz, lnz)
+		c.verticalEdge(cur, left, mbx, mby, e, cnz, lnz, uni)
 	}
 	for e := 0; e < last; e += step {
-		c.horizontalEdge(cur, top, mbx, mby, e, cnz, tnz)
+		c.horizontalEdge(cur, top, mbx, mby, e, cnz, tnz, uni)
 	}
 }
 
@@ -242,7 +272,7 @@ func (m *MB) internalEdgesUnfiltered() bool {
 	return true
 }
 
-func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int, cnz, lnz uint16) {
+func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int, cnz, lnz uint16, uni uint8) {
 	p, pnz, pr := cur, cnz, e-1
 	mbEdge := e == 0
 	if mbEdge {
@@ -252,7 +282,7 @@ func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int, cnz, lnz uint
 		p, pnz, pr = left, lnz, 3
 	}
 	x := e * 4
-	bs, any := edgeStrengths(p, cur, pnz, cnz, pr, e, 4, mbEdge)
+	bs, any := edgeStrengths(p, cur, pnz, cnz, uni, pr, e, 4, mbEdge, e&1 != 0)
 	if !any {
 		return
 	}
@@ -278,7 +308,7 @@ func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int, cnz, lnz uint
 		c.pic.ChromaOffset(cx, mby*8), bs, cia[0], cib[0], cia[1], cib[1])
 }
 
-func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int, cnz, tnz uint16) {
+func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int, cnz, tnz uint16, uni uint8) {
 	p, pnz, pr := cur, cnz, (e-1)*4
 	mbEdge := e == 0
 	if mbEdge {
@@ -288,7 +318,7 @@ func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int, cnz, tnz uin
 		p, pnz, pr = top, tnz, 12
 	}
 	y := e * 4
-	bs, any := edgeStrengths(p, cur, pnz, cnz, pr, e*4, 1, mbEdge)
+	bs, any := edgeStrengths(p, cur, pnz, cnz, uni, pr, e*4, 1, mbEdge, e&1 != 0)
 	if !any {
 		return
 	}
