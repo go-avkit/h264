@@ -92,7 +92,7 @@ func TestTheEngineAgreesWithTheBitByBitDecoder(t *testing.T) {
 		// The data begins on a byte boundary, so Init starts the code at bit 0: the
 		// oracle reads its nine bits from there, from the same contexts.
 		o := &oracle{r: bits.NewReader(data), rng: 510}
-		o.ctx = dec.ctx
+		o.ctx = splitContexts(&dec)
 		first, _ := o.r.ReadBits(9)
 		o.off = first
 		for n := 0; n < 3000; n++ {

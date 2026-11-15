@@ -60,7 +60,9 @@ func (e *Encoder) Init(w *bits.Writer, sliceQPY int, intra bool, initIDC uint32)
 		d.initContexts(contextInitPB[initIDC], sliceQPY)
 	}
 	e.w = w
-	e.ctx = d.ctx
+	for i, v := range d.ctx { // the decoder's merged byte back to the two fields
+		e.ctx[i] = context{state: v >> 1, mps: v & 1}
+	}
 	e.low = 0
 	e.rng = 510
 	e.firstBitFlag = true
