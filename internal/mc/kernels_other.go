@@ -7,4 +7,5 @@ package mc
 const (
 	kernelsLuma   = false
 	kernelsWeight = false
+	kernelsChroma = false
 )

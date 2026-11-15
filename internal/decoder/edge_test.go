@@ -90,6 +90,16 @@ func TestEdgeEmulationMatchesAPaddedReference(t *testing.T) {
 					t.Fatalf("%s chroma %dx%d at (%d,%d) mv (%d,%d): emulated edge differs from the padded reference", name, cw, ch, cx, cy, cmvx, cmvy)
 				}
 			}
+			// both planes in one call, with the footprints rebuilt where needed
+			var emuC [2][emuChromaSide * emuChromaSide]byte
+			gotCb, gotCr := make([]byte, 7*8*8), make([]byte, 7*8*8)
+			wantCb, wantCr := make([]byte, 7*8*8), make([]byte, 7*8*8)
+			mc.PredictChroma(wantCb, 8, 2, pad.Cb, pad.StrideC, pad.ChromaOffset(cx, cy), cw, ch, cmvx, cmvy)
+			mc.PredictChroma(wantCr, 8, 2, pad.Cr, pad.StrideC, pad.ChromaOffset(cx, cy), cw, ch, cmvx, cmvy)
+			predictChromaPair(ref, &emuC, gotCb, gotCr, 8, 2, cx, cy, cw, ch, cmvx, cmvy)
+			if !bytes.Equal(wantCb, gotCb) || !bytes.Equal(wantCr, gotCr) {
+				t.Fatalf("%s chroma pair %dx%d at (%d,%d) mv (%d,%d): differs from the padded reference", name, cw, ch, cx, cy, cmvx, cmvy)
+			}
 		}
 		if outside < 2000 || inside < 2000 {
 			t.Fatalf("%s: %d blocks outside and %d inside; the test needs both", name, outside, inside)
