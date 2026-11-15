@@ -17,6 +17,13 @@ func kernelSize(w, h int) bool {
 	return false
 }
 
+// useLumaKernel is the decision between the kernels and the portable path: the
+// kernels exist on this build, take this block size, and the destination does
+// not share memory with the source (they panic on that).
+func useLumaKernel(dst, src []byte, w, h int) bool {
+	return kernelsLuma && kernelSize(w, h) && !shares(dst, src)
+}
+
 // PredictLuma writes the quarter-sample luma prediction of the w x h block at
 // src[srcOff] displaced by (mvx, mvy) quarter samples to dst.
 //
@@ -24,7 +31,7 @@ func kernelSize(w, h int) bool {
 // elsewhere the portable code of this package, which on amd64 sits behind the
 // avo kernels of internal/simd. The caller proves the footprint lies in src.
 func PredictLuma(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOff int, w, h, mvx, mvy int) {
-	if kernelsLuma && kernelSize(w, h) && !shares(dst, src) {
+	if useLumaKernel(dst, src, w, h) {
 		kmc.PutLuma(dst, dstOff, dstStride, src, srcOff+(mvy>>2)*srcStride+(mvx>>2), srcStride, w, h, mvx&3, mvy&3)
 		return
 	}
@@ -35,7 +42,7 @@ func PredictLuma(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOf
 // the second prediction of a bi-predicted block. Fused into the producer where
 // the kernels are used; otherwise a prediction block and the average.
 func PredictLumaAvg(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOff int, w, h, mvx, mvy int) {
-	if kernelsLuma && kernelSize(w, h) && !shares(dst, src) {
+	if useLumaKernel(dst, src, w, h) {
 		kmc.AvgLuma(dst, dstOff, dstStride, src, srcOff+(mvy>>2)*srcStride+(mvx>>2), srcStride, w, h, mvx&3, mvy&3)
 		return
 	}
