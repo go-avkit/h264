@@ -61,10 +61,12 @@ func chromaKernelSize(w, h int) bool {
 // PredictChromaPair is PredictChroma for the Cb and Cr planes of one block,
 // which share the position, strides, size and vector: one call of the kernels
 // where they are used, two of PredictChroma otherwise. The caller proves the
-// (w+1) x (h+1) footprint lies in both sources.
+// (w+1) x (h+1) footprint lies in both sources. The kernels' own checks decide
+// whether they take the call (sizes of 2, 4 and 8, footprints, memory shared by
+// the blocks): a refusal comes back as an error, never a panic, and the portable
+// path runs.
 func PredictChromaPair(dstCb, dstCr []byte, dstStride, dstOff int, srcCb, srcCr []byte, srcStride, srcOff int, w, h, mvx, mvy int) {
-	if kernelsChroma && chromaKernelSize(w, h) && !shares(dstCb, srcCb) && !shares(dstCb, srcCr) && !shares(dstCr, srcCb) && !shares(dstCr, srcCr) && !shares(dstCb, dstCr) {
-		kmc.PutChromaPair(dstCb, dstCr, dstOff, dstStride, srcCb, srcCr, srcOff+(mvy>>3)*srcStride+(mvx>>3), srcStride, w, h, mvx&7, mvy&7)
+	if kernelsChroma && kmc.TryPutChromaPair(dstCb, dstCr, dstOff, dstStride, srcCb, srcCr, srcOff+(mvy>>3)*srcStride+(mvx>>3), srcStride, w, h, mvx&7, mvy&7) == nil {
 		return
 	}
 	PredictChroma(dstCb, dstStride, dstOff, srcCb, srcStride, srcOff, w, h, mvx, mvy)
@@ -76,8 +78,7 @@ func PredictChromaPair(dstCb, dstCr []byte, dstStride, dstOff int, srcCb, srcCr 
 // One fused call of the kernels where they are used; otherwise a prediction
 // block per plane and the average.
 func PredictChromaPairAvg(dstCb, dstCr []byte, dstStride, dstOff int, srcCb, srcCr []byte, srcStride, srcOff int, w, h, mvx, mvy int) {
-	if kernelsChroma && chromaKernelSize(w, h) && !shares(dstCb, srcCb) && !shares(dstCb, srcCr) && !shares(dstCr, srcCb) && !shares(dstCr, srcCr) && !shares(dstCb, dstCr) {
-		kmc.AvgChromaPair(dstCb, dstCr, dstOff, dstStride, srcCb, srcCr, srcOff+(mvy>>3)*srcStride+(mvx>>3), srcStride, w, h, mvx&7, mvy&7)
+	if kernelsChroma && kmc.TryAvgChromaPair(dstCb, dstCr, dstOff, dstStride, srcCb, srcCr, srcOff+(mvy>>3)*srcStride+(mvx>>3), srcStride, w, h, mvx&7, mvy&7) == nil {
 		return
 	}
 	var cb, cr [64]byte

@@ -15,10 +15,12 @@ func TestPredictChromaPairMatchesPerPlane(t *testing.T) {
 	const stride = 20
 	// 6 and 3 wide, 6 and 3 high: sizes a merged run of motion produces, which
 	// the kernels do not take
-	for _, sz := range [][2]int{{8, 8}, {8, 4}, {4, 8}, {4, 4}, {4, 2}, {2, 2}, {4, 6}, {6, 8}, {6, 6}, {8, 6}, {2, 6}, {3, 4}} {
+	for _, sz := range [][2]int{{8, 8}, {8, 4}, {8, 2}, {2, 8}, {4, 8}, {4, 4}, {4, 2}, {2, 2}, {4, 6}, {6, 8}, {6, 6}, {8, 6}, {2, 6}, {3, 4}} {
 		w, h := sz[0], sz[1]
-		for mvx := -9; mvx < 9; mvx += 3 {
-			for mvy := -9; mvy < 9; mvy += 5 {
+		// vectors with whole-sample parts (0, 8, -8: fractions of zero) and every
+		// other fraction among them
+		for _, mvx := range []int{-9, -8, -3, 0, 5, 8} {
+			for _, mvy := range []int{-9, -4, 0, 1, 8} {
 				srcCb, srcCr := make([]byte, 400), make([]byte, 400)
 				for i := range srcCb {
 					srcCb[i], srcCr[i] = byte(r.Intn(256)), byte(r.Intn(256))
