@@ -174,7 +174,19 @@ func WeightUni(dst []byte, stride, off, w, h, weight, offset, logWD int) {
 	}
 }
 
+// WeightBi is the weighted bi-prediction of 8.4.2.3.2, equation 8-276.
+//
+// With w0 = w1 = 2^logWD and a zero offset the equation collapses to the
+// default average of 8.4.2.3.1, equation 8-273:
+// ((a + b) * 2^logWD + 2^logWD) >> (logWD + 1) = (a + b + 1) >> 1, which is
+// already inside 0..255 so Clip1 does nothing. That is every implicit pair
+// that comes out (32, 32) (equations 8-280, 8-281: equal POC distances, long
+// term pictures, or weights out of range), so it takes the Average path.
 func WeightBi(dst []byte, dstStride, dstOff int, a []byte, aStride, aOff int, b []byte, bStride, bOff int, w, h, w0, w1, o0, o1, logWD int) {
+	if w0 == w1 && w0 == 1<<uint(logWD) && (o0+o1+1)>>1 == 0 {
+		Average(dst, dstStride, dstOff, a, aStride, aOff, b, bStride, bOff, w, h)
+		return
+	}
 	round := 1 << uint(logWD)
 	shift := uint(logWD + 1)
 	offset := (o0 + o1 + 1) >> 1
