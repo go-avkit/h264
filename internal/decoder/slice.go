@@ -29,6 +29,8 @@ type sliceDecoder struct {
 	weights         *predWeights
 	weightMode      int
 
+	dirBase directBase // spatial direct, once per B macroblock (binter.go)
+
 	emuLuma [emuLumaSide * emuLumaSide]byte
 	predA   predBuffer
 	predB   predBuffer
@@ -89,6 +91,9 @@ func (d *sliceDecoder) startMB(mbAddr int) {
 		d.cur.refIdxL1[i] = -1
 	}
 	d.cur.Bipredictive = d.hdr.SliceType.IsB()
+	if d.cur.Bipredictive {
+		d.dirBase.ok = false
+	}
 	d.subPartsAtLeast8x8 = true
 	d.nb = d.grid.around(d.mbx, d.mby, d.sliceID)
 }

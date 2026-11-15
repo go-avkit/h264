@@ -1,0 +1,37 @@
+go-avkit/h264 (main with the Inverse8x8 and motionSegments changes) against ffmpeg 6.1.1, decode alone,
+AMD Ryzen 9 7950X, one core (taskset -c 9), 7 interleaved rounds per clip. The 1-minute, 5-minute and
+15-minute load averages (/proc/loadavg) are read before EACH round (the host was otherwise idle: a single
+pinned decode adds about 1.0 to the 1-minute figure only after a minute, hence the small values).
+
+What each side times (the ratio is not like for like, and slightly favours go-avkit/h264):
+  go-avkit/h264: wall time of the decode inside the process (tools/clip --nohash): after the file is read
+                 and the process is running, no demux, no output.
+  ffmpeg:        utime + stime of the whole process (-benchmark), so it includes process start, the demuxer
+                 (raw Annex B probing) and the null muxer. That fixed cost is measured at the end: about
+                 0.011 s for a tiny stream, i.e. 1.2 % of ffmpeg's 0.94 s on alien and 3.6 % of its 0.30 s on
+                 fade. Subtracting it moves the ratios (ffmpeg time / ours) from 0.31x to 0.30x on alien
+                 (0.94/3.03 to 0.93/3.03) and from 0.265x to 0.254x on fade (0.301/1.136 to 0.290/1.136);
+                 they are not subtracted in the table below.
+
+go: tools/clip --nohash (main at 46683e0 not rebuilt: clip_b0 = main before the spatial-direct PR)
+clip alien: round loadavg(1,5,15) go_seconds ffmpeg_utime ffmpeg_stime
+1 0.23 0.38 0.34 3.152 utime=0.935s stime=0.015s
+2 0.37 0.40 0.35 3.030 utime=0.927s stime=0.017s
+3 0.42 0.41 0.35 3.013 utime=0.931s stime=0.013s
+4 0.47 0.42 0.35 3.034 utime=0.931s stime=0.016s
+5 0.51 0.43 0.36 3.022 utime=0.933s stime=0.013s
+6 0.51 0.43 0.36 3.027 utime=0.923s stime=0.020s
+7 0.55 0.44 0.36 3.029 utime=0.924s stime=0.022s
+clip fade: round loadavg(1,5,15) go_seconds ffmpeg_utime ffmpeg_stime
+1 0.58 0.45 0.37 1.134 utime=0.302s stime=0.004s
+2 0.58 0.45 0.37 1.134 utime=0.301s stime=0.005s
+3 0.62 0.46 0.37 1.138 utime=0.299s stime=0.006s
+4 0.62 0.46 0.37 1.136 utime=0.299s stime=0.007s
+5 0.62 0.46 0.37 1.140 utime=0.299s stime=0.007s
+6 0.65 0.47 0.37 1.136 utime=0.299s stime=0.007s
+7 0.65 0.47 0.37 1.137 utime=0.303s stime=0.003s
+ffmpeg fixed cost (one tiny stream: process start, demux, one decode):
+bench: utime=0.009s stime=0.002s rtime=0.011s
+bench: utime=0.006s stime=0.006s rtime=0.011s
+bench: utime=0.007s stime=0.004s rtime=0.011s
+ 20:35:03 up 64 days,  6:30,  5 users,  load average: 0,65, 0,47, 0,37

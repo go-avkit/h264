@@ -11,6 +11,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -45,6 +46,7 @@ func main() {
 // RootCmd builds the command.
 func RootCmd() *cobra.Command {
 	var dir, manifests, base string
+	var writePin bool
 	cmd := &cobra.Command{
 		Use:          "jvtfetch",
 		Short:        "download the JVT conformance streams the manifests name",
@@ -72,7 +74,7 @@ func RootCmd() *cobra.Command {
 				sem <- struct{}{}
 				go func() {
 					defer func() { <-sem; wg.Done() }()
-					err := fetch(base, dir, name)
+					err := fetch(base, dir, name, filepath.Join(manifests, name+".sha256"), writePin)
 					mu.Lock()
 					defer mu.Unlock()
 					if err != nil {
@@ -89,16 +91,27 @@ func RootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dir, "dir", "", "directory to unpack into")
 	cmd.Flags().StringVar(&manifests, "manifests", filepath.Join("testdata", "jvt"), "directory of NAME.md5 files")
 	cmd.Flags().StringVar(&base, "url", defaultURL, "base URL of the NAME.zip archives")
+	cmd.Flags().BoolVar(&writePin, "write-pins", false, "write NAME.sha256 (the SHA-256 of every bitstream file) next to each manifest instead of verifying it")
 	_ = cmd.MarkFlagRequired("dir")
 	return cmd
 }
 
 // fetch downloads NAME.zip into dir/NAME. It does nothing when a bitstream is
 // already there.
-func fetch(base, dir, name string) error {
+func fetch(base, dir, name, pin string, write bool) error {
 	dst := filepath.Join(dir, name)
 	if hasBitstream(dst) {
-		return nil
+		if write {
+			return writePins(dst, pin)
+		}
+		if verifyPins(dst, pin) == nil {
+			return nil
+		}
+		// What is there (a restored cache, an earlier run) is not what the pin
+		// names: it is fetched again, not trusted.
+		if err := os.RemoveAll(dst); err != nil {
+			return err
+		}
 	}
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		return err
@@ -129,6 +142,57 @@ func fetch(base, dir, name string) error {
 	}
 	if !hasBitstream(dst) {
 		return errors.New("the archive holds no bitstream")
+	}
+	if write {
+		return writePins(dst, pin)
+	}
+	return verifyPins(dst, pin)
+}
+
+// pinText is the content of a stream's pin file: the SHA-256 of every bitstream
+// file of the stream's directory, "hex  name" lines in name order. A stream that
+// comes out of the cache or the network must reproduce it exactly: the decoded
+// pictures are compared with ffmpeg's too, but a stream that was swapped for one
+// that decodes the same way, or truncated where the tests do not look, is
+// caught here first.
+func pinText(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	for _, e := range entries { // ReadDir sorts by name
+		if e.IsDir() || !bitstreamExt[strings.ToLower(filepath.Ext(e.Name()))] {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(&b, "%x  %s\n", sha256.Sum256(data), e.Name())
+	}
+	return b.String(), nil
+}
+
+func writePins(dir, pin string) error {
+	text, err := pinText(dir)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(pin, []byte(text), 0o644)
+}
+
+func verifyPins(dir, pin string) error {
+	want, err := os.ReadFile(pin)
+	if err != nil {
+		return fmt.Errorf("unpinned stream (run with --write-pins to create %s): %w", pin, err)
+	}
+	got, err := pinText(dir)
+	if err != nil {
+		return err
+	}
+	if got != string(want) {
+		return fmt.Errorf("the stream does not match its pin %s", pin)
 	}
 	return nil
 }

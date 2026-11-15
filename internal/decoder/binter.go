@@ -88,21 +88,67 @@ func (d *sliceDecoder) spatialDirectBase() (ref [2]int8, mv [2][2]int16, zeroPre
 	return ref, mv, false
 }
 
+// directBase is the part of the spatial direct derivation (8.4.1.2.2) that is
+// the same for every partition of a macroblock: the reference indices and the
+// motion vectors come from the neighbours A, B and C of the macroblock as a
+// whole (mbPartIdx = 0, subMbPartIdx = 0; NOTE 1 and NOTE 3 of the clause), so a
+// B_8x8 macroblock with several direct sub-macroblocks derived them once per
+// sub-macroblock. startMB clears it.
+type directBase struct {
+	ok       bool
+	ref      [2]int8
+	mv       [2][2]int16
+	zeroPred bool
+}
+
 func (d *sliceDecoder) spatialDirect(x, y, w, h int) {
-	ref, mv, zeroPred := d.spatialDirectBase()
+	b := &d.dirBase
+	if !b.ok {
+		b.ref, b.mv, b.zeroPred = d.spatialDirectBase()
+		b.ok = true
+	}
+	ref, mv := b.ref, b.mv
+	var pic [2]*frame.Picture
+	for list := 0; list < 2; list++ {
+		if ref[list] >= 0 {
+			pic[list] = d.refPictureIn(list, ref[list])
+		}
+	}
+	// colZeroFlag only matters for a list whose reference index is 0, and only
+	// with a short-term RefPicList1[0] and no directZeroPredictionFlag: otherwise
+	// the co-located data is not read at all.
+	useCol := !b.zeroPred && d.colShortTerm && (ref[0] == 0 || ref[1] == 0)
+	// With direct_8x8_inference_flag the co-located block is the corner block of
+	// the 8x8 quadrant: one lookup per quadrant, not per 4x4 block.
+	var quad [4]int8 // 0 unknown, 1 colZero, 2 not
 	for by := y; by < y+h; by += 4 {
 		for bx := x; bx < x+w; bx += 4 {
 			blockMv := mv
-			if !zeroPred && d.colZero(bx>>2, by>>2) {
-				for list := 0; list < 2; list++ {
-					if ref[list] == 0 {
-						blockMv[list] = [2]int16{}
+			if useCol {
+				var zero bool
+				if d.direct8x8 {
+					q := (by>>3)*2 + bx>>3
+					if quad[q] == 0 {
+						quad[q] = 2
+						if d.colZero(bx>>2, by>>2) {
+							quad[q] = 1
+						}
+					}
+					zero = quad[q] == 1
+				} else {
+					zero = d.colZero(bx>>2, by>>2)
+				}
+				if zero {
+					for list := 0; list < 2; list++ {
+						if ref[list] == 0 {
+							blockMv[list] = [2]int16{}
+						}
 					}
 				}
 			}
-			for list := 0; list < 2; list++ {
-				d.storeMotion(list, bx, by, 4, 4, blockMv[list], ref[list])
-			}
+			z := zscanOf[by>>2][bx>>2]
+			d.cur.MvL0[z], d.cur.refIdxL0[z], d.cur.RefPicL0[z] = blockMv[0], ref[0], pic[0]
+			d.cur.MvL1[z], d.cur.refIdxL1[z], d.cur.RefPicL1[z] = blockMv[1], ref[1], pic[1]
 		}
 	}
 }
@@ -162,7 +208,17 @@ func (d *sliceDecoder) temporalDirect(x, y, w, h int) {
 	}
 }
 
+// DirectCensus, when set (by the conformance test), is called for every direct
+// derivation with whether it is spatial, whether direct_8x8_inference_flag is
+// set, and the area it covers in luma samples (256 per macroblock): it counts
+// which direct paths a stream exercises. A nil check on a package variable is
+// the whole cost when it is not set.
+var DirectCensus func(spatial, direct8x8 bool, area int)
+
 func (d *sliceDecoder) directMotion(x, y, w, h int) {
+	if DirectCensus != nil {
+		DirectCensus(d.directSpatial, d.direct8x8, w*h)
+	}
 	if d.directSpatial {
 		d.spatialDirect(x, y, w, h)
 		return
