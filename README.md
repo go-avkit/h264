@@ -80,12 +80,28 @@ Medians of 7 interleaved rounds, `GOMAXPROCS=1`, Apple M4 Max, 1-minute load 7.8
 (`H264_MIDGOP_CLIP=<file>`, the ffmpeg command that makes the clip is in its
 comment).
 
-It is still about 3 times slower than ffmpeg on decode alone (179 ms against
+At v0.8.0 it was still about 3 times slower than ffmpeg on decode alone (179 ms against
 about 58 ms, once ffmpeg's process start is taken off), which is an open defect
 ([go-avkit/decode#10](https://github.com/go-avkit/decode/issues/10)). Where the
 time goes now: CABAC residual decoding (the `DecodeDecision` engine itself; a
 one-step renormalisation was measured and gave nothing), the remaining deblocking,
 and no NEON kernels on arm64.
+
+**v0.11.0** (27 commits since v0.10.0) runs luma prediction, explicit weights and
+deblocking, the 8x8 and 4x4 inverse transforms, chroma prediction and the loop-filter
+strengths on go-videodsp/kernels, and tightens CABAC; the API is unchanged. Whole
+decode, one core (`GOMAXPROCS=1`), Apple M4 Max, 1080p, 4 rounds in each order,
+INDICATIVE (1-minute load 11 to 17: the ratios are stable across rounds, the absolute
+times are not), framemd5 identical to ffmpeg on every frame of both clips:
+
+| clip | v0.10.0 | v0.11.0 | ffmpeg 9.0.2 `-threads 1` |
+|---|---|---|---|
+| alien (240 frames) | 5.75 to 6.05 s | 2.28 to 2.39 s | 0.99 to 1.01 s |
+| fade, explicit weights (120 frames) | 2.01 to 2.13 s | 0.82 to 0.89 s | 0.29 s |
+
+That is about 2.5 times faster than v0.10.0, and still 2.3 times (alien) to 2.9 times
+(fade) slower than ffmpeg, an open defect. Zen 4 is not re-measured for v0.11.0: the
+amd64 figures below are from before the later kernel work.
 
 On amd64 with AVX2, luma prediction, weighted prediction and deblocking run the
 AVX2 kernels of [go-videodsp/kernels](https://github.com/go-videodsp/kernels)
