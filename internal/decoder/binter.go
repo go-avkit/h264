@@ -75,7 +75,7 @@ func (d *sliceDecoder) colZero(bx4, by4 int) bool {
 func (d *sliceDecoder) spatialDirectBase() (ref [2]int8, mv [2][2]int16, zeroPred bool) {
 	for list := 0; list < 2; list++ {
 		a, b, c := d.neighboursFor(list, 0, 0, 16)
-		ref[list] = minPositive(a.ref, minPositive(b.ref, c.ref))
+		ref[list] = minPositive(int8(a.ref), minPositive(int8(b.ref), int8(c.ref)))
 	}
 	if ref[0] < 0 && ref[1] < 0 {
 		return [2]int8{0, 0}, [2][2]int16{}, true

@@ -5,9 +5,14 @@ import (
 	"github.com/go-avkit/h264/internal/loopfilter"
 )
 
+// motion is a neighbour's vector and reference index. ref is an int16 and not
+// an int8 on purpose: with an int8 the compiler builds the 6-byte value on the
+// stack with a 4-byte and a 1-byte store and reads it back with a 4-byte and a
+// 2-byte load, which the store buffer cannot forward, and that stall was 69 % of
+// neighboursFor (4 % of the decode). With an int16 every load matches a store.
 type motion struct {
 	mv  [2]int16
-	ref int8
+	ref int16
 }
 
 var zscanOf = [4][4]int{
@@ -48,7 +53,7 @@ func (m *mbState) mv(list, blk int) [2]int16 {
 }
 
 func blockMotion(m *mbState, list, blk int) motion {
-	return motion{mv: m.mv(list, blk), ref: m.refIdx(list, blk)}
+	return motion{mv: m.mv(list, blk), ref: int16(m.refIdx(list, blk))}
 }
 
 func (d *sliceDecoder) neighbourBlock(x, y, curZ int) (*mbState, int) {
@@ -171,7 +176,8 @@ func (d *sliceDecoder) neighboursFor(list, x, y, w int) (a, b, c motion) {
 	return a, b, c
 }
 
-func (d *sliceDecoder) predictMV(list, x, y, w, h int, refIdx int8, partIdx, kind int) [2]int16 {
+func (d *sliceDecoder) predictMV(list, x, y, w, h int, ref int8, partIdx, kind int) [2]int16 {
+	refIdx := int16(ref)
 	a, b, c := d.neighboursFor(list, x, y, w)
 
 	switch shape := shapeOf(kind); {
