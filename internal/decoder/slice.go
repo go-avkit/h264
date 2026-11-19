@@ -7,7 +7,6 @@ import (
 	"github.com/go-avkit/h264/internal/bits"
 	"github.com/go-avkit/h264/internal/cabac"
 	"github.com/go-avkit/h264/internal/frame"
-	"github.com/go-avkit/h264/internal/loopfilter"
 	"github.com/go-avkit/h264/internal/transform"
 )
 
@@ -79,24 +78,25 @@ func (d *sliceDecoder) mayUse8x8Transform() bool {
 
 func (d *sliceDecoder) totalMBs() int { return d.grid.widthMBs * d.grid.heightMBs }
 
+// noRef16 is a refIdx table with no reference in any block.
+var noRef16 = [16]int8{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}
+
 func (d *sliceDecoder) startMB(mbAddr int) {
-	d.mbx = mbAddr % d.grid.widthMBs
 	d.mby = mbAddr / d.grid.widthMBs
-	d.cur = d.grid.at(d.mbx, d.mby)
-	*d.cur = mbState{
-		MB: loopfilter.MB{
-			SliceID:        d.sliceID,
-			QPY:            d.qpY,
-			ChromaQPOffset: [2]int{int(d.pps.ChromaQPIndexOffset), int(d.pps.SecondChromaQPOffset)},
-			DisableDeblock: d.hdr.DisableDeblockingFilterIDC,
-			AlphaOffset:    int(d.hdr.SliceAlphaC0OffsetDiv2) * 2,
-			BetaOffset:     int(d.hdr.SliceBetaOffsetDiv2) * 2,
-		},
-	}
-	for i := range d.cur.refIdxL0 {
-		d.cur.refIdxL0[i] = -1
-		d.cur.refIdxL1[i] = -1
-	}
+	d.mbx = mbAddr - d.mby*d.grid.widthMBs
+	m := d.grid.at(d.mbx, d.mby)
+	d.cur = m
+	// Cleared where it lies: a composite literal with fields is built on the
+	// stack and copied, which writes the 648 bytes of a cold grid slot twice.
+	*m = mbState{}
+	m.SliceID = d.sliceID
+	m.QPY = d.qpY
+	m.ChromaQPOffset = [2]int{int(d.pps.ChromaQPIndexOffset), int(d.pps.SecondChromaQPOffset)}
+	m.DisableDeblock = d.hdr.DisableDeblockingFilterIDC
+	m.AlphaOffset = int(d.hdr.SliceAlphaC0OffsetDiv2) * 2
+	m.BetaOffset = int(d.hdr.SliceBetaOffsetDiv2) * 2
+	m.refIdxL0 = noRef16
+	m.refIdxL1 = noRef16
 	d.cur.Bipredictive = d.hdr.SliceType.IsB()
 	if d.cur.Bipredictive {
 		d.dirBase.ok = false

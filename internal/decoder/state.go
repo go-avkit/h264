@@ -131,10 +131,12 @@ func (g *mbGrid) motion(mo *frame.Motion) *frame.Motion {
 			if m == nil || m.Intra {
 				continue
 			}
+			base := mo.Index(mbx*4, mby*4)
 			for blk := 0; blk < 16; blk++ {
-				bx := mbx*4 + blockX[blk]/4
-				by := mby*4 + blockY[blk]/4
-				i := mo.Index(bx, by)
+				if m.refIdxL0[blk] < 0 && m.refIdxL1[blk] < 0 {
+					continue
+				}
+				i := base + blockRowOff[blk]*mo.BlocksWide + blockColOff[blk]
 				if r := m.refIdxL0[blk]; r >= 0 {
 					mo.Mv[0][i] = m.MvL0[blk]
 					mo.RefIdx[0][i] = r
