@@ -28,7 +28,7 @@ func TestRefModeAgainstItsOwnListing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := decodeAll(data, true)
+	got, err := decodeAll(data, true, 0)
 	if err != nil || len(got) == 0 || got[0] == "" {
 		t.Fatalf("decodeAll: %v %v", got, err)
 	}
@@ -58,6 +58,33 @@ func TestRefModeAgainstItsOwnListing(t *testing.T) {
 		if _, err := run(t, "--in", stream, "--ref", list); err == nil || !strings.Contains(err.Error(), "frames") {
 			t.Fatalf("a short listing was accepted: %v", err)
 		}
+	}
+}
+
+// Feeding the stream in pieces, down to one byte at a time (a piece need not end
+// on a NAL unit boundary), gives the pictures of feeding it whole, and the count
+// without hashing is the same.
+func TestChunkedFeedGivesTheSamePictures(t *testing.T) {
+	data, err := os.ReadFile(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := decodeAll(data, true, 0)
+	if err != nil || len(want) == 0 {
+		t.Fatalf("whole: %v %v", want, err)
+	}
+	for _, chunk := range []int{1, 7, 4096, len(data), len(data) + 1, -1} {
+		got, err := decodeAll(data, true, chunk)
+		if err != nil || strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("chunk %d: %v differs from the whole feed (%v)", chunk, err, got)
+		}
+		counted, err := decodeAll(data, false, chunk)
+		if err != nil || len(counted) != len(want) {
+			t.Fatalf("chunk %d without hashing: %d pictures, want %d (%v)", chunk, len(counted), len(want), err)
+		}
+	}
+	if _, err := decodeAll(nil, true, 10); err != nil {
+		t.Fatalf("an empty stream: %v", err)
 	}
 }
 
