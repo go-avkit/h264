@@ -33,26 +33,45 @@ func sums(fr []*decoder.Frame) []string {
 	return out
 }
 
-// decodeAll decodes the stream and returns one MD5 per picture, or, without
-// hashing, a slice of the right length with empty strings.
-func decodeAll(data []byte, hash bool) ([]string, error) {
+// decodeAll decodes the stream, fed in pieces of chunk bytes (the whole stream
+// when chunk is 0), and returns one MD5 per picture, or, without hashing, a
+// slice of the right length with empty strings.
+//
+// The pictures of a call are valid until the next one, and the decoder reuses
+// the storage of those that are no longer references. Fed the whole stream in
+// one call, every picture of the stream is alive at once, nothing can be
+// reused, and the decoder allocates a picture per frame: on a 1080p clip 199 000
+// page faults and 0.32 s of system time in 2.6 s, against 16 000 and 0.03 s
+// fed in pieces, which is how a player feeds it.
+func decodeAll(data []byte, hash bool, chunk int) ([]string, error) {
 	d := decoder.New(decoder.Limits{})
-	fr, err := d.Decode(data)
-	if err != nil {
-		return nil, err
-	}
 	var got []string
-	if hash {
-		got = sums(fr)
+	count := 0
+	take := func(fr []*decoder.Frame) {
+		count += len(fr)
+		if hash {
+			got = append(got, sums(fr)...) // before the next call, which may recycle them
+		}
+	}
+	if chunk <= 0 || chunk > len(data) {
+		chunk = max(len(data), 1)
+	}
+	for off := 0; off < len(data); off += chunk {
+		fr, err := d.Decode(data[off:min(off+chunk, len(data))])
+		if err != nil {
+			return nil, err
+		}
+		take(fr)
 	}
 	rest, err := d.Flush()
 	if err != nil {
 		return nil, err
 	}
+	take(rest)
 	if !hash {
-		return make([]string, len(fr)+len(rest)), nil
+		return make([]string, count), nil
 	}
-	return append(got, sums(rest)...), nil
+	return got, nil
 }
 
 // refSums reads the last field of every line of an ffmpeg framemd5 listing.
@@ -88,7 +107,7 @@ func compare(out io.Writer, got, want []string) error {
 // RootCmd builds the command.
 func RootCmd() *cobra.Command {
 	var in, ref string
-	var rounds int
+	var rounds, chunk int
 	var nohash bool
 	cmd := &cobra.Command{
 		Use:          "clip",
@@ -105,7 +124,7 @@ func RootCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				got, err := decodeAll(data, true)
+				got, err := decodeAll(data, true, chunk)
 				if err != nil {
 					return err
 				}
@@ -113,7 +132,7 @@ func RootCmd() *cobra.Command {
 			}
 			for r := 0; r < rounds; r++ {
 				t := time.Now()
-				if _, err := decodeAll(data, !nohash); err != nil {
+				if _, err := decodeAll(data, !nohash, chunk); err != nil {
 					return err
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%.3f\n", time.Since(t).Seconds())
@@ -125,6 +144,7 @@ func RootCmd() *cobra.Command {
 	f.StringVar(&in, "in", "", "Annex B file")
 	f.StringVar(&ref, "ref", "", "ffmpeg framemd5 listing to compare with")
 	f.IntVar(&rounds, "rounds", 1, "timed decodes")
+	f.IntVar(&chunk, "chunk", 65536, "feed the stream in pieces of this many bytes; 0 feeds it whole, which keeps every picture alive and defeats the decoder's reuse of them")
 	f.BoolVar(&nohash, "nohash", false, "time the decode alone, without the per-picture MD5")
 	_ = cmd.MarkFlagRequired("in")
 	return cmd
