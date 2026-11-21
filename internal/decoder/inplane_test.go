@@ -75,6 +75,34 @@ func TestInPlaneRouteEqualsThePlainRoute(t *testing.T) {
 	t.Logf("%d luma and %d chroma blocks through the planes", lumaDone, chromaDone)
 }
 
+// TestInsideBlocksAreReadInPlace: a block whose footprint lies inside the
+// reference never touches the room for the rebuilt footprint, and one that
+// straddles the edge does. The two give the same samples, so only the room tells
+// them apart.
+func TestInsideBlocksAreReadInPlace(t *testing.T) {
+	rng := rand.New(rand.NewSource(13))
+	ref := randomPicture(3, 3, func() byte { return byte(rng.Intn(256)) })
+	for _, c := range []struct {
+		name     string
+		x, y     int
+		touching bool
+	}{{"inside", 16, 16, false}, {"left edge", 0, 16, true}, {"top edge", 16, 0, true}} {
+		var emu [emuLumaSide * emuLumaSide]byte
+		for i := range emu {
+			emu[i] = 0xAA
+		}
+		dst := make([]byte, 16*16)
+		predictLumaBlockAvg(ref, &emu, dst, 16, 0, c.x, c.y, 8, 8, 0, 0, false)
+		touched := false
+		for _, b := range emu {
+			touched = touched || b != 0xAA
+		}
+		if touched != c.touching {
+			t.Errorf("%s: footprint rebuilt = %v, want %v", c.name, touched, c.touching)
+		}
+	}
+}
+
 // TestInPlaneRouteNeedsBothPicturesProved: a picture built without NewPicture, or
 // whose proof was cleared, is never written or read through the planes.
 func TestInPlaneRouteNeedsBothPicturesProved(t *testing.T) {
