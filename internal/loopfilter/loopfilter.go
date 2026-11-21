@@ -289,8 +289,9 @@ func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int, cnz, lnz uint
 	qpAv := deblock.AverageQP(p.filterQPY(), cur.filterQPY())
 	ia := deblock.IndexA(qpAv, cur.AlphaOffset)
 	ib := deblock.IndexB(qpAv, cur.BetaOffset)
-	deblock.FilterLumaEdgeVertical(c.pic.Y, c.pic.StrideY,
-		c.pic.LumaOffset(mbx*16+x, mby*16), bs, ia, ib)
+	strong := mbEdge && (p.Intra || cur.Intra)
+	deblock.FilterLumaEdgeVerticalClassified(c.pic.Y, c.pic.StrideY,
+		c.pic.LumaOffset(mbx*16+x, mby*16), bs, strong, ia, ib)
 
 	if e != 0 && e != 2 {
 		return
@@ -304,8 +305,8 @@ func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int, cnz, lnz uint
 			h264.ChromaQP(cur.filterQPY(), offsets[plane]))
 		cia[plane], cib[plane] = deblock.IndexA(qpc, cur.AlphaOffset), deblock.IndexB(qpc, cur.BetaOffset)
 	}
-	deblock.FilterChromaPairVertical(c.pic.Cb, c.pic.Cr, c.pic.StrideC,
-		c.pic.ChromaOffset(cx, mby*8), bs, cia[0], cib[0], cia[1], cib[1])
+	deblock.FilterChromaPairVerticalClassified(c.pic.Cb, c.pic.Cr, c.pic.StrideC,
+		c.pic.ChromaOffset(cx, mby*8), bs, strong, cia[0], cib[0], cia[1], cib[1])
 }
 
 func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int, cnz, tnz uint16, uni uint8) {
@@ -323,8 +324,9 @@ func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int, cnz, tnz uin
 		return
 	}
 	qpAv := deblock.AverageQP(p.filterQPY(), cur.filterQPY())
-	deblock.FilterLumaEdgeHorizontal(c.pic.Y, c.pic.StrideY,
-		c.pic.LumaOffset(mbx*16, mby*16+y), bs,
+	strong := mbEdge && (p.Intra || cur.Intra)
+	deblock.FilterLumaEdgeHorizontalClassified(c.pic.Y, c.pic.StrideY,
+		c.pic.LumaOffset(mbx*16, mby*16+y), bs, strong,
 		deblock.IndexA(qpAv, cur.AlphaOffset), deblock.IndexB(qpAv, cur.BetaOffset))
 
 	if e != 0 && e != 2 {
@@ -339,6 +341,6 @@ func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int, cnz, tnz uin
 			h264.ChromaQP(cur.filterQPY(), offsets[plane]))
 		ia[plane], ib[plane] = deblock.IndexA(qpc, cur.AlphaOffset), deblock.IndexB(qpc, cur.BetaOffset)
 	}
-	deblock.FilterChromaPairHorizontal(c.pic.Cb, c.pic.Cr, c.pic.StrideC,
-		c.pic.ChromaOffset(mbx*8, cy), bs, ia[0], ib[0], ia[1], ib[1])
+	deblock.FilterChromaPairHorizontalClassified(c.pic.Cb, c.pic.Cr, c.pic.StrideC,
+		c.pic.ChromaOffset(mbx*8, cy), bs, strong, ia[0], ib[0], ia[1], ib[1])
 }
