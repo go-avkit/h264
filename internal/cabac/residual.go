@@ -1,5 +1,7 @@
 package cabac
 
+import kcabac "github.com/go-videodsp/kernels/cabac"
+
 const (
 	CatIntra16x16DC = 0
 	CatIntra16x16AC = 1
@@ -65,40 +67,40 @@ func absLevelBase(cat int) (base, limit int) {
 	return offAbsLevel + catOffsetAbsLevel[cat], 4
 }
 
-const maxCoeffLevel = 32767
+// maxBlockCoeffs is the longest coefficient list of the categories handled here
+// (the 4x4 blocks); the 8x8 block has its own table.
+const maxBlockCoeffs = 16
 
-func (d *Decoder) boundedLevel(v int) int {
-	if v > maxCoeffLevel {
-		d.overflow = true
-		return maxCoeffLevel
-	}
-	return v
-}
+// residualScans[cat][numC8x8-1][len(coeffs)-2] is the kernel's description of a
+// block: the context of the significance and last flag of every coded position
+// (Table 9-34 offsets, with the chroma DC increment min(i/numC8x8, 2)) and the
+// base and limit of the level contexts. Built once, validated by NewScan.
+var residualScans = buildResidualScans()
 
-func (d *Decoder) absLevelMinus1At(base, limit, numGt1, numEq1 int) int {
-	prefix := 0
-	for prefix < 14 {
-		if d.DecodeDecision(absLevelIncAt(base, limit, prefix, numGt1, numEq1)) == 0 {
-			break
+func buildResidualScans() (t [CatChromaAC + 1][2][maxBlockCoeffs - 1]*kcabac.Scan) {
+	for cat := CatIntra16x16DC; cat <= CatChromaAC; cat++ {
+		for n8 := 1; n8 <= 2; n8++ {
+			for length := 2; length <= maxBlockCoeffs; length++ {
+				sig := make([]uint16, length-1)
+				last := make([]uint16, length-1)
+				for i := range sig {
+					inc := i
+					if cat == CatChromaDC {
+						inc = significanceInc(cat, i, n8)
+					}
+					sig[i] = uint16(offSignificant + catOffsetSignificant[cat] + inc)
+					last[i] = uint16(offLastSignificant + catOffsetSignificant[cat] + inc)
+				}
+				base, limit := absLevelBase(cat)
+				s, err := kcabac.NewScan(sig, last, base, limit)
+				if err != nil {
+					panic(err)
+				}
+				t[cat][n8-1][length-2] = s
+			}
 		}
-		prefix++
 	}
-	if prefix < 14 {
-		return prefix
-	}
-	value := 14
-	k := 0
-	for d.DecodeBypass() == 1 {
-		value += 1 << uint(k)
-		k++
-		if k > 24 {
-			break
-		}
-	}
-	for k--; k >= 0; k-- {
-		value += int(d.DecodeBypass()) << uint(k)
-	}
-	return value
+	return t
 }
 
 func (d *Decoder) ResidualBlock(coeffs []int32, cat, condTermA, condTermB, numC8x8 int) int {
@@ -108,51 +110,5 @@ func (d *Decoder) ResidualBlock(coeffs []int32, cat, condTermA, condTermB, numC8
 	if !d.CodedBlockFlag(cat, condTermA, condTermB) {
 		return 0
 	}
-	maxNumCoeff := len(coeffs)
-	levelBase, levelLimit := absLevelBase(cat)
-
-	// The significant positions are collected in order as the map is decoded, and
-	// the context offsets of the category are computed once, not per coefficient.
-	var pos [16]uint8
-	n := 0
-	last := false
-	sigBase := offSignificant + catOffsetSignificant[cat]
-	lastBase := offLastSignificant + catOffsetSignificant[cat]
-	for i := 0; i < maxNumCoeff-1; i++ {
-		sigInc := i
-		if cat == CatChromaDC {
-			sigInc = significanceInc(cat, i, numC8x8)
-		}
-		if d.DecodeDecision(sigBase+sigInc) == 1 {
-			pos[n] = uint8(i)
-			n++
-			if d.DecodeDecision(lastBase+sigInc) == 1 {
-				last = true
-				break
-			}
-		}
-	}
-	if !last { // the last coefficient is significant without being coded
-		pos[n] = uint8(maxNumCoeff - 1)
-		n++
-	}
-
-	numGt1, numEq1 := 0, 0
-	total := 0
-	for k := n - 1; k >= 0; k-- {
-		i := pos[k]
-		level := d.boundedLevel(d.absLevelMinus1At(levelBase, levelLimit, numGt1, numEq1) + 1)
-		if level > 1 {
-			numGt1++
-		} else {
-			numEq1++
-		}
-		if d.DecodeBypass() == 1 {
-			coeffs[i] = int32(-level)
-		} else {
-			coeffs[i] = int32(level)
-		}
-		total++
-	}
-	return total
+	return kcabac.Decode(&d.st, (*kcabac.Contexts)(&d.ctx), residualScans[cat][numC8x8-1][len(coeffs)-2], coeffs)
 }
