@@ -101,7 +101,8 @@ func edgeStrength(p, q *MB, pBlk, qBlk int, mbEdge bool) uint8 {
 // block index the per-block arrays use.
 var rasterBlk = [16]int{0, 1, 4, 5, 2, 3, 6, 7, 8, 9, 12, 13, 10, 11, 14, 15}
 
-// nzMask returns lumaNonZero of every block of m as one bit per block index,
+// nzMask returns lumaNonZero of every block of m as one bit per raster
+// position (row*4+column of a 4x4 block),
 // so an edge reads sixteen answers computed once instead of recomputing them
 // (with the 8x8 and IPCM cases) for each of its eight uses. The bytes of
 // NzY are tested eight at a time: the carry-free sum sets bit 7 of every
@@ -119,7 +120,9 @@ func nzMask(m *MB) uint16 {
 		r &= 0x1111
 		r *= 15
 	}
-	return r
+	// block index bits are y1 x1 y0 x0, raster ones y1 y0 x1 x0: swap bits 1 and 2
+	t := (r>>2 ^ r) & 0x0c0c
+	return r ^ t ^ t<<2
 }
 
 // gather returns bit i set when byte i of w is not zero.
@@ -151,34 +154,6 @@ func quadUniform(m *MB) uint8 {
 		}
 	}
 	return u
-}
-
-// edgeStrengths is edgeStrength for the four 4-sample groups of one edge. The
-// groups run along the edge: pr and qr are the raster positions of the first
-// group's blocks on each side and step moves to the next group. It returns
-// the same four values as four calls of edgeStrength.
-func edgeStrengths(p, q *MB, pnz, qnz uint16, uni uint8, pr, qr, step int, mbEdge, inside bool) (bs [4]uint8, any bool) {
-	if p.Intra || q.Intra {
-		v := uint8(3)
-		if mbEdge {
-			v = 4
-		}
-		return [4]uint8{v, v, v, v}, true
-	}
-	for g := 0; g < 4; g++ {
-		pi, qi := pr+g*step, qr+g*step
-		switch {
-		case pnz>>uint(rasterBlk[pi])&1|qnz>>uint(rasterBlk[qi])&1 != 0:
-			bs[g] = 2
-			any = true
-		case inside && uni>>uint(rasterQuad[qi])&1 != 0:
-			// both blocks lie in one 8x8 quadrant of uniform motion
-		case motionDiffers(p, q, rasterBlk[pi], rasterBlk[qi]):
-			bs[g] = 1
-			any = true
-		}
-	}
-	return bs, any
 }
 
 type edgeContext struct {
@@ -240,11 +215,17 @@ func (c *edgeContext) filterMB(mbx, mby int) {
 	if top != nil {
 		tnz = nzMask(top)
 	}
+	var s mbStrengths
+	s.compute(cur, left, top, cnz, lnz, tnz, uni, last, step)
 	for e := 0; e < last; e += step {
-		c.verticalEdge(cur, left, mbx, mby, e, cnz, lnz, uni)
+		if s.any[0]>>uint(e)&1 != 0 {
+			c.verticalEdge(cur, left, mbx, mby, e, s.bs[0][e])
+		}
 	}
 	for e := 0; e < last; e += step {
-		c.horizontalEdge(cur, top, mbx, mby, e, cnz, tnz, uni)
+		if s.any[1]>>uint(e)&1 != 0 {
+			c.horizontalEdge(cur, top, mbx, mby, e, s.bs[1][e])
+		}
 	}
 }
 
@@ -272,20 +253,15 @@ func (m *MB) internalEdgesUnfiltered() bool {
 	return true
 }
 
-func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int, cnz, lnz uint16, uni uint8) {
-	p, pnz, pr := cur, cnz, e-1
+// verticalEdge and horizontalEdge filter edge e with the strengths bs, which
+// are not all zero (strengths.go).
+func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int, bs [4]uint8) {
+	p := cur
 	mbEdge := e == 0
 	if mbEdge {
-		if left == nil {
-			return
-		}
-		p, pnz, pr = left, lnz, 3
+		p = left
 	}
 	x := e * 4
-	bs, any := edgeStrengths(p, cur, pnz, cnz, uni, pr, e, 4, mbEdge, e&1 != 0)
-	if !any {
-		return
-	}
 	qpAv := deblock.AverageQP(p.filterQPY(), cur.filterQPY())
 	ia := deblock.IndexA(qpAv, cur.AlphaOffset)
 	ib := deblock.IndexB(qpAv, cur.BetaOffset)
@@ -309,20 +285,13 @@ func (c *edgeContext) verticalEdge(cur, left *MB, mbx, mby, e int, cnz, lnz uint
 		c.pic.ChromaOffset(cx, mby*8), bs, strong, cia[0], cib[0], cia[1], cib[1])
 }
 
-func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int, cnz, tnz uint16, uni uint8) {
-	p, pnz, pr := cur, cnz, (e-1)*4
+func (c *edgeContext) horizontalEdge(cur, top *MB, mbx, mby, e int, bs [4]uint8) {
+	p := cur
 	mbEdge := e == 0
 	if mbEdge {
-		if top == nil {
-			return
-		}
-		p, pnz, pr = top, tnz, 12
+		p = top
 	}
 	y := e * 4
-	bs, any := edgeStrengths(p, cur, pnz, cnz, uni, pr, e*4, 1, mbEdge, e&1 != 0)
-	if !any {
-		return
-	}
 	qpAv := deblock.AverageQP(p.filterQPY(), cur.filterQPY())
 	strong := mbEdge && (p.Intra || cur.Intra)
 	deblock.FilterLumaEdgeHorizontalClassified(c.pic.Y, c.pic.StrideY,
