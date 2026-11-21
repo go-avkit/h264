@@ -1,5 +1,7 @@
 package frame
 
+import kmc "github.com/go-videodsp/kernels/mc"
+
 const LumaMargin = 32
 
 const ChromaMargin = LumaMargin / 2
@@ -22,6 +24,15 @@ type Picture struct {
 	LongTerm bool
 
 	Motion *Motion
+
+	// MCLuma and MCChroma are the planes above proved once for the motion
+	// compensation kernels (NewPicture does it; the planes of a recycled picture
+	// are the same memory). MCProved is false for a picture built without
+	// NewPicture or whose planes the kernels refused: its blocks take the
+	// per-call path. Code that replaces Y, Cb or Cr must clear MCProved.
+	MCLuma   kmc.Plane
+	MCChroma kmc.ChromaPair
+	MCProved bool
 }
 
 func NewPicture(widthMBs, heightMBs int) *Picture {
@@ -40,7 +51,22 @@ func NewPicture(widthMBs, heightMBs int) *Picture {
 	p.Y = make([]byte, strideY*(h+2*LumaMargin))
 	p.Cb = make([]byte, strideC*(h/2+2*ChromaMargin))
 	p.Cr = make([]byte, strideC*(h/2+2*ChromaMargin))
+	p.proveMC()
 	return p
+}
+
+// proveMC proves the planes for the kernels, or leaves MCProved false.
+func (p *Picture) proveMC() {
+	p.MCProved = false
+	luma, err := kmc.NewPlane(p.Y, p.StrideY)
+	if err != nil {
+		return
+	}
+	chroma, err := kmc.NewChromaPair(p.Cb, p.Cr, p.StrideC)
+	if err != nil {
+		return
+	}
+	p.MCLuma, p.MCChroma, p.MCProved = luma, chroma, true
 }
 
 // Recycle makes a picture whose planes are being reused look like a new one:
