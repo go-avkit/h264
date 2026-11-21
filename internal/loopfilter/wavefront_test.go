@@ -81,7 +81,7 @@ func TestApplyAcrossRowsMatchesRasterOrder(t *testing.T) {
 		}
 		pic := smoothPicture(rng, size[0], size[1])
 		want := clonePicture(pic)
-		ctx := edgeContext{at: at, pic: want}
+		ctx := newEdgeContext(want, at)
 		for mby := 0; mby < size[1]; mby++ {
 			for mbx := 0; mbx < size[0]; mbx++ {
 				ctx.filterMB(mbx, mby)
