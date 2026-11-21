@@ -441,6 +441,18 @@ func sameMotion(m *mbState, a, b int) bool {
 // the 16x16 partitions, most of the macroblocks of a picture) is one segment: it
 // is tested first, with no used-block bookkeeping.
 func motionSegments(m *mbState, dst []motionSegment) []motionSegment {
+	// The macroblock type already says how the motion is split: one motion
+	// for the 16x16 types and P_Skip, two halves for 16x8 and 8x16. Nothing is
+	// compared after the fact. Halves that happen to share a motion stay two
+	// segments, which predicts the same samples as one.
+	switch m.kind {
+	case mbTypePSkip, mbTypeP16x16, mbTypeB16x16:
+		return append(dst[:0], motionSegmentAt(m, 0, 0, 0, 16, 16))
+	case mbTypeP16x8, mbTypeB16x8:
+		return append(dst[:0], motionSegmentAt(m, 0, 0, 0, 16, 8), motionSegmentAt(m, 8, 0, 8, 16, 8))
+	case mbTypeP8x16, mbTypeB8x16:
+		return append(dst[:0], motionSegmentAt(m, 0, 0, 0, 8, 16), motionSegmentAt(m, 4, 8, 0, 8, 16))
+	}
 	uniform := true
 	for b := 1; b < 16; b++ {
 		if !sameMotion(m, 0, b) {
@@ -456,6 +468,16 @@ func motionSegments(m *mbState, dst []motionSegment) []motionSegment {
 		})
 	}
 	return motionSegmentsMerged(m, dst)
+}
+
+// motionSegmentAt is the segment of size w x h at (x, y) whose motion is that of
+// the 4x4 block z in decoding order.
+func motionSegmentAt(m *mbState, z, x, y, w, h int) motionSegment {
+	return motionSegment{
+		x: x, y: y, w: w, h: h,
+		mv:  [2][2]int16{m.MvL0[z], m.MvL1[z]},
+		ref: [2]int8{m.refIdxL0[z], m.refIdxL1[z]},
+	}
 }
 
 func motionSegmentsMerged(m *mbState, dst []motionSegment) []motionSegment {
