@@ -1,5 +1,11 @@
 package frame
 
+import (
+	"unsafe"
+
+	kmc "github.com/go-videodsp/kernels/mc"
+)
+
 const LumaMargin = 32
 
 const ChromaMargin = LumaMargin / 2
@@ -22,6 +28,28 @@ type Picture struct {
 	LongTerm bool
 
 	Motion *Motion
+
+	// MCLuma and MCChroma are the planes above proved once for the motion
+	// compensation kernels (NewPicture does it; the planes of a recycled picture
+	// are the same memory). MCProved is false for a picture built without
+	// NewPicture or whose planes the kernels refused: its blocks take the
+	// per-call path. Proved also compares the planes with the ones proved, so a copy given new planes is not routed through the old memory.
+	MCLuma   kmc.Plane
+	MCChroma kmc.ChromaPair
+	MCProved bool
+
+	// mcY, mcCb and mcCr are the first samples of the planes that were proved,
+	// so a copy of the Picture given other planes is recognised by Proved.
+	mcY, mcCb, mcCr *byte
+}
+
+// head is the first sample of b, nil for a nil plane.
+func head(b []byte) *byte { return unsafe.SliceData(b) }
+
+// Proved reports whether MCLuma and MCChroma stand for the planes the picture
+// holds now: proved, and Y, Cb and Cr still the memory that was proved.
+func (p *Picture) Proved() bool {
+	return p.MCProved && p.mcY != nil && head(p.Y) == p.mcY && head(p.Cb) == p.mcCb && head(p.Cr) == p.mcCr
 }
 
 func NewPicture(widthMBs, heightMBs int) *Picture {
@@ -40,7 +68,23 @@ func NewPicture(widthMBs, heightMBs int) *Picture {
 	p.Y = make([]byte, strideY*(h+2*LumaMargin))
 	p.Cb = make([]byte, strideC*(h/2+2*ChromaMargin))
 	p.Cr = make([]byte, strideC*(h/2+2*ChromaMargin))
+	p.proveMC()
 	return p
+}
+
+// proveMC proves the planes for the kernels, or leaves MCProved false.
+func (p *Picture) proveMC() {
+	p.MCProved = false
+	luma, err := kmc.NewPlane(p.Y, p.StrideY)
+	if err != nil {
+		return
+	}
+	chroma, err := kmc.NewChromaPair(p.Cb, p.Cr, p.StrideC)
+	if err != nil {
+		return
+	}
+	p.MCLuma, p.MCChroma, p.MCProved = luma, chroma, true
+	p.mcY, p.mcCb, p.mcCr = head(p.Y), head(p.Cb), head(p.Cr)
 }
 
 // Recycle makes a picture whose planes are being reused look like a new one:

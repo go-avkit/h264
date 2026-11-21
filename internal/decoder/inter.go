@@ -283,16 +283,44 @@ func (d *sliceDecoder) predictLumaSeg(ref *frame.Picture, seg motionSegment, lis
 }
 
 func predictChromaSeg(ref *frame.Picture, emu *[2][emuChromaSide * emuChromaSide]byte, seg motionSegment, list, x, y int, dstCb, dstCr []byte, strideC, offC int, avg bool) {
+	cmvx, cmvy := chromaVector(ref, seg, list, x, y)
+	predictChromaPair(ref, emu, dstCb, dstCr, strideC, offC, x/2, y/2, seg.w/2, seg.h/2, cmvx, cmvy, avg)
+}
+
+// chromaVector is list's vector of seg in eighth samples, clamped to the
+// border of ref.
+func chromaVector(ref *frame.Picture, seg motionSegment, list, x, y int) (int, int) {
 	mv := seg.mv[list]
 	cx, cy := x/2, y/2
 	cw, ch := seg.w/2, seg.h/2
-	cmvx := clampComponent(int(mv[0]),
-		-frame.ChromaMargin-cx,
-		ref.Width/2+frame.ChromaMargin-chromaTapAfter-cx-cw, 3)
-	cmvy := clampComponent(int(mv[1]),
-		-frame.ChromaMargin-cy,
-		ref.Height/2+frame.ChromaMargin-chromaTapAfter-cy-ch, 3)
-	predictChromaPair(ref, emu, dstCb, dstCr, strideC, offC, cx, cy, cw, ch, cmvx, cmvy, avg)
+	return clampComponent(int(mv[0]),
+			-frame.ChromaMargin-cx,
+			ref.Width/2+frame.ChromaMargin-chromaTapAfter-cx-cw, 3),
+		clampComponent(int(mv[1]),
+			-frame.ChromaMargin-cy,
+			ref.Height/2+frame.ChromaMargin-chromaTapAfter-cy-ch, 3)
+}
+
+// predictSegIntoPicture predicts seg of list from ref into the current picture
+// (averaged into it when avg is set), luma and both chroma planes. Blocks whose
+// footprint lies inside ref go through the planes proved once for both pictures;
+// the others take predictLumaSeg and predictChromaSeg.
+func (d *sliceDecoder) predictSegIntoPicture(ref *frame.Picture, seg motionSegment, list, x, y int, avg bool) {
+	mv := seg.mv[list]
+	mvx := clampComponent(int(mv[0]),
+		lumaTapBefore-frame.LumaMargin-x,
+		ref.Width+frame.LumaMargin-lumaTapAfter-x-seg.w, 2)
+	mvy := clampComponent(int(mv[1]),
+		lumaTapBefore-frame.LumaMargin-y,
+		ref.Height+frame.LumaMargin-lumaTapAfter-y-seg.h, 2)
+	if !predictLumaInPlace(d.pic, ref, x, y, seg.w, seg.h, mvx, mvy, avg) {
+		predictLumaBlockAvg(ref, &d.emuLuma, d.pic.Y, d.pic.StrideY, d.pic.LumaOffset(x, y), x, y, seg.w, seg.h, mvx, mvy, avg)
+	}
+	cmvx, cmvy := chromaVector(ref, seg, list, x, y)
+	cx, cy, cw, ch := x/2, y/2, seg.w/2, seg.h/2
+	if !predictChromaInPlace(d.pic, ref, cx, cy, cw, ch, cmvx, cmvy, avg) {
+		predictChromaPair(ref, &d.emuChroma, d.pic.Cb, d.pic.Cr, d.pic.StrideC, d.pic.ChromaOffset(cx, cy), cx, cy, cw, ch, cmvx, cmvy, avg)
+	}
 }
 
 func (d *sliceDecoder) weightEntry(list int, ref int8) *weightEntry {
@@ -400,12 +428,8 @@ func (d *sliceDecoder) motionCompensate() {
 			if r0 == nil || r1 == nil {
 				break
 			}
-			lumaOff := d.pic.LumaOffset(x, y)
-			d.predictLumaSeg(r0, seg, 0, x, y, d.pic.Y, d.pic.StrideY, lumaOff, false)
-			d.predictLumaSeg(r1, seg, 1, x, y, d.pic.Y, d.pic.StrideY, lumaOff, true)
-			chromaOff := d.pic.ChromaOffset(x/2, y/2)
-			predictChromaSeg(r0, &d.emuChroma, seg, 0, x, y, d.pic.Cb, d.pic.Cr, d.pic.StrideC, chromaOff, false)
-			predictChromaSeg(r1, &d.emuChroma, seg, 1, x, y, d.pic.Cb, d.pic.Cr, d.pic.StrideC, chromaOff, true)
+			d.predictSegIntoPicture(r0, seg, 0, x, y, false)
+			d.predictSegIntoPicture(r1, seg, 1, x, y, true)
 		case use0 && use1:
 			okA := d.predictOne(0, seg, x, y, d.predA.y[:], 16, 0, d.predA.cb[:], d.predA.cr[:], 8, 0)
 			okB := d.predictOne(1, seg, x, y, d.predB.y[:], 16, 0, d.predB.cb[:], d.predB.cr[:], 8, 0)
@@ -417,8 +441,8 @@ func (d *sliceDecoder) motionCompensate() {
 			if use1 {
 				list = 1
 			}
-			if d.predictOne(list, seg, x, y, d.pic.Y, d.pic.StrideY, d.pic.LumaOffset(x, y),
-				d.pic.Cb, d.pic.Cr, d.pic.StrideC, d.pic.ChromaOffset(x/2, y/2)) {
+			if ref := d.refPictureIn(list, seg.ref[list]); ref != nil {
+				d.predictSegIntoPicture(ref, seg, list, x, y, false)
 				d.weightUni(list, seg, x, y)
 			}
 		}

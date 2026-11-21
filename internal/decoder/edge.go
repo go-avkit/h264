@@ -28,8 +28,7 @@ const (
 // instead of replacing them.
 func predictLumaBlockAvg(ref *frame.Picture, emu *[emuLumaSide * emuLumaSide]byte, dst []byte, dstStride, dstOff, x, y, w, h, mvx, mvy int, avg bool) {
 	lx, ly := x+mvx>>2, y+mvy>>2
-	if lx-lumaTapBefore >= 0 && lx+w+lumaTapAfter <= ref.Width &&
-		ly-lumaTapBefore >= 0 && ly+h+lumaTapAfter <= ref.Height {
+	if lumaInside(ref, lx, ly, w, h) {
 		if avg {
 			mc.PredictLumaAvg(dst, dstStride, dstOff, ref.Y, ref.StrideY, ref.LumaOffset(x, y), w, h, mvx, mvy)
 		} else {
@@ -46,6 +45,44 @@ func predictLumaBlockAvg(ref *frame.Picture, emu *[emuLumaSide * emuLumaSide]byt
 	}
 	mc.PredictLuma(dst, dstStride, dstOff, emu[:], emuLumaSide, lumaTapBefore*emuLumaSide+lumaTapBefore,
 		w, h, mvx&3, mvy&3)
+}
+
+// lumaInside reports whether the footprint of the filter for a w x h block at
+// integer position (lx, ly) lies inside the picture, so ref is read in place.
+func lumaInside(ref *frame.Picture, lx, ly, w, h int) bool {
+	return lx-lumaTapBefore >= 0 && lx+w+lumaTapAfter <= ref.Width &&
+		ly-lumaTapBefore >= 0 && ly+h+lumaTapAfter <= ref.Height
+}
+
+// chromaInside is lumaInside for chroma at (px, py) with a cw x ch block.
+func chromaInside(ref *frame.Picture, px, py, cw, ch int) bool {
+	return px >= 0 && px+cw+chromaTapAfter <= ref.Width/2 && py >= 0 && py+ch+chromaTapAfter <= ref.Height/2
+}
+
+// predictLumaInPlace predicts into the current picture pic from ref through the
+// planes both proved once, when the footprint lies inside ref and both are
+// proved. It reports whether it wrote; false leaves the block to
+// predictLumaBlockAvg. (mvx, mvy) is already clamped to the border.
+func predictLumaInPlace(pic, ref *frame.Picture, x, y, w, h, mvx, mvy int, avg bool) bool {
+	if !pic.Proved() || !ref.Proved() || !lumaInside(ref, x+mvx>>2, y+mvy>>2, w, h) {
+		return false
+	}
+	if avg {
+		return mc.AvgLumaPlane(&pic.MCLuma, pic.LumaOffset(x, y), &ref.MCLuma, ref.LumaOffset(x, y), ref.StrideY, w, h, mvx, mvy)
+	}
+	return mc.PutLumaPlane(&pic.MCLuma, pic.LumaOffset(x, y), &ref.MCLuma, ref.LumaOffset(x, y), ref.StrideY, w, h, mvx, mvy)
+}
+
+// predictChromaInPlace is predictLumaInPlace for both chroma planes, at chroma
+// position (cx, cy), vector (cmvx, cmvy) in eighths.
+func predictChromaInPlace(pic, ref *frame.Picture, cx, cy, cw, ch, cmvx, cmvy int, avg bool) bool {
+	if !pic.Proved() || !ref.Proved() || !chromaInside(ref, cx+cmvx>>3, cy+cmvy>>3, cw, ch) {
+		return false
+	}
+	if avg {
+		return mc.AvgChromaPlane(&pic.MCChroma, pic.ChromaOffset(cx, cy), &ref.MCChroma, ref.ChromaOffset(cx, cy), ref.StrideC, cw, ch, cmvx, cmvy)
+	}
+	return mc.PutChromaPlane(&pic.MCChroma, pic.ChromaOffset(cx, cy), &ref.MCChroma, ref.ChromaOffset(cx, cy), ref.StrideC, cw, ch, cmvx, cmvy)
 }
 
 // predictChromaPair is predictChromaBlock for both planes at once (they share
