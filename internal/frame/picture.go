@@ -29,10 +29,29 @@ type Picture struct {
 	// compensation kernels (NewPicture does it; the planes of a recycled picture
 	// are the same memory). MCProved is false for a picture built without
 	// NewPicture or whose planes the kernels refused: its blocks take the
-	// per-call path. Code that replaces Y, Cb or Cr must clear MCProved.
+	// per-call path. Proved also compares the planes with the ones proved, so a copy given new planes is not routed through the old memory.
 	MCLuma   kmc.Plane
 	MCChroma kmc.ChromaPair
 	MCProved bool
+
+	// mcY, mcCb and mcCr are the first samples of the planes that were proved,
+	// so a copy of the Picture given other planes is recognised by Proved.
+	mcY, mcCb, mcCr *byte
+}
+
+// head is the first sample of b, nil for an empty plane.
+func head(b []byte) *byte {
+	if len(b) == 0 {
+		return nil
+	}
+	return &b[0]
+}
+
+// Proved reports whether MCLuma and MCChroma stand for the planes the picture
+// holds now: proved, and Y, Cb and Cr still the memory that was proved.
+func (p *Picture) Proved() bool {
+	return p.MCProved && len(p.Y) > 0 && len(p.Cb) > 0 && len(p.Cr) > 0 &&
+		&p.Y[0] == p.mcY && &p.Cb[0] == p.mcCb && &p.Cr[0] == p.mcCr
 }
 
 func NewPicture(widthMBs, heightMBs int) *Picture {
@@ -67,6 +86,7 @@ func (p *Picture) proveMC() {
 		return
 	}
 	p.MCLuma, p.MCChroma, p.MCProved = luma, chroma, true
+	p.mcY, p.mcCb, p.mcCr = head(p.Y), head(p.Cb), head(p.Cr)
 }
 
 // Recycle makes a picture whose planes are being reused look like a new one:

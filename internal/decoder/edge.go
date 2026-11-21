@@ -64,7 +64,7 @@ func chromaInside(ref *frame.Picture, px, py, cw, ch int) bool {
 // proved. It reports whether it wrote; false leaves the block to
 // predictLumaBlockAvg. (mvx, mvy) is already clamped to the border.
 func predictLumaInPlace(pic, ref *frame.Picture, x, y, w, h, mvx, mvy int, avg bool) bool {
-	if !pic.MCProved || !ref.MCProved || !lumaInside(ref, x+mvx>>2, y+mvy>>2, w, h) {
+	if !pic.Proved() || !ref.Proved() || !lumaInside(ref, x+mvx>>2, y+mvy>>2, w, h) {
 		return false
 	}
 	if avg {
@@ -76,7 +76,7 @@ func predictLumaInPlace(pic, ref *frame.Picture, x, y, w, h, mvx, mvy int, avg b
 // predictChromaInPlace is predictLumaInPlace for both chroma planes, at chroma
 // position (cx, cy), vector (cmvx, cmvy) in eighths.
 func predictChromaInPlace(pic, ref *frame.Picture, cx, cy, cw, ch, cmvx, cmvy int, avg bool) bool {
-	if !pic.MCProved || !ref.MCProved || !chromaInside(ref, cx+cmvx>>3, cy+cmvy>>3, cw, ch) {
+	if !pic.Proved() || !ref.Proved() || !chromaInside(ref, cx+cmvx>>3, cy+cmvy>>3, cw, ch) {
 		return false
 	}
 	if avg {

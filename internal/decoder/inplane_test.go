@@ -5,6 +5,8 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/go-avkit/h264/internal/frame"
+
 	"github.com/go-avkit/h264/internal/mc"
 )
 
@@ -100,6 +102,31 @@ func TestInsideBlocksAreReadInPlace(t *testing.T) {
 		if touched != c.touching {
 			t.Errorf("%s: footprint rebuilt = %v, want %v", c.name, touched, c.touching)
 		}
+	}
+}
+
+// TestACopyWithNewPlanesIsNeverRoutedInPlace: the copies made by padded() and the
+// wavefront tests share the proof of planes they no longer hold; predicting
+// through them would write the old memory.
+func TestACopyWithNewPlanesIsNeverRoutedInPlace(t *testing.T) {
+	rng := rand.New(rand.NewSource(14))
+	fill := func() byte { return byte(rng.Intn(256)) }
+	ref := randomPicture(4, 4, fill)
+	pic := randomPicture(4, 4, fill)
+	oldY, oldCb := bytes.Clone(pic.Y), bytes.Clone(pic.Cb)
+	copyPic := *pic
+	copyPic.Y, copyPic.Cb = bytes.Clone(pic.Y), bytes.Clone(pic.Cb)
+	copyRef := padded(ref)
+	for _, c := range []struct {
+		name     string
+		dst, src *frame.Picture
+	}{{"destination copy", &copyPic, ref}, {"reference copy", pic, copyRef}} {
+		if predictLumaInPlace(c.dst, c.src, 16, 16, 16, 16, 4, 4, false) || predictChromaInPlace(c.dst, c.src, 8, 8, 8, 8, 4, 4, true) {
+			t.Errorf("%s: routed through the old planes", c.name)
+		}
+	}
+	if !bytes.Equal(pic.Y, oldY) || !bytes.Equal(pic.Cb, oldCb) {
+		t.Fatal("the original planes were written through a copy's proof")
 	}
 }
 
