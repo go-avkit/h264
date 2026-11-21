@@ -1,6 +1,10 @@
 package frame
 
-import kmc "github.com/go-videodsp/kernels/mc"
+import (
+	"unsafe"
+
+	kmc "github.com/go-videodsp/kernels/mc"
+)
 
 const LumaMargin = 32
 
@@ -39,19 +43,13 @@ type Picture struct {
 	mcY, mcCb, mcCr *byte
 }
 
-// head is the first sample of b, nil for an empty plane.
-func head(b []byte) *byte {
-	if len(b) == 0 {
-		return nil
-	}
-	return &b[0]
-}
+// head is the first sample of b, nil for a nil plane.
+func head(b []byte) *byte { return unsafe.SliceData(b) }
 
 // Proved reports whether MCLuma and MCChroma stand for the planes the picture
 // holds now: proved, and Y, Cb and Cr still the memory that was proved.
 func (p *Picture) Proved() bool {
-	return p.MCProved && len(p.Y) > 0 && len(p.Cb) > 0 && len(p.Cr) > 0 &&
-		&p.Y[0] == p.mcY && &p.Cb[0] == p.mcCb && &p.Cr[0] == p.mcCr
+	return p.MCProved && p.mcY != nil && head(p.Y) == p.mcY && head(p.Cb) == p.mcCb && head(p.Cr) == p.mcCr
 }
 
 func NewPicture(widthMBs, heightMBs int) *Picture {

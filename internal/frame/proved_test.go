@@ -46,8 +46,8 @@ func TestHeadOfAPlane(t *testing.T) {
 	if head(b) != &b[0] {
 		t.Error("head is not the first sample")
 	}
-	if head(nil) != nil || head([]byte{}) != nil {
-		t.Error("head of an empty plane is not nil")
+	if head(nil) != nil {
+		t.Error("head of a nil plane is not nil")
 	}
 }
 
