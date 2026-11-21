@@ -170,7 +170,7 @@ jobs:
             go.sum
             tools/go.sum
       - name: Restore the JVT streams
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ runner.temp }}/jvt
           key: jvt-${{ hashFiles('testdata/jvt/*.md5') }}
