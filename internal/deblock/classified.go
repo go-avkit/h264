@@ -1,6 +1,15 @@
 package deblock
 
-import "github.com/go-videodsp/kernels/lf"
+import (
+	"sync/atomic"
+
+	"github.com/go-videodsp/kernels/lf"
+)
+
+// classifiedFallbacks counts the calls that took the plain filters because the
+// build has no kernels, so a test can tell the two routes apart (their output
+// is identical by construction).
+var classifiedFallbacks atomic.Int64
 
 // The *Classified entry points are the edge filters for a caller that already
 // knows the class of its four strengths: strong is true when all four are 4,
@@ -18,6 +27,7 @@ func FilterLumaEdgeVerticalClassified(plane []byte, stride, offset int, bS [4]ui
 		}
 		return
 	}
+	classifiedFallbacks.Add(1)
 	FilterLumaEdgeVertical(plane, stride, offset, bS, indexA, indexB)
 }
 
@@ -31,6 +41,7 @@ func FilterLumaEdgeHorizontalClassified(plane []byte, stride, offset int, bS [4]
 		}
 		return
 	}
+	classifiedFallbacks.Add(1)
 	FilterLumaEdgeHorizontal(plane, stride, offset, bS, indexA, indexB)
 }
 
@@ -44,6 +55,7 @@ func FilterChromaPairVerticalClassified(cb, cr []byte, stride, offset int, bS [4
 		}
 		return
 	}
+	classifiedFallbacks.Add(1)
 	FilterChromaPairVertical(cb, cr, stride, offset, bS, indexACb, indexBCb, indexACr, indexBCr)
 }
 
@@ -57,5 +69,6 @@ func FilterChromaPairHorizontalClassified(cb, cr []byte, stride, offset int, bS 
 		}
 		return
 	}
+	classifiedFallbacks.Add(1)
 	FilterChromaPairHorizontal(cb, cr, stride, offset, bS, indexACb, indexBCb, indexACr, indexBCr)
 }

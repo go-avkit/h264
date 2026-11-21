@@ -19,6 +19,16 @@ func TestClassifiedMatchesPlain(t *testing.T) {
 		}
 		return p
 	}
+	before := classifiedFallbacks.Load()
+	defer func() {
+		took := classifiedFallbacks.Load() - before
+		if kernelsLF && took != 0 {
+			t.Errorf("%d classified calls fell back to the plain filters with the kernels on", took)
+		}
+		if !kernelsLF && took != 4*4000 {
+			t.Errorf("%d fallbacks, want %d without the kernels", took, 4*4000)
+		}
+	}()
 	for n := 0; n < 4000; n++ {
 		strong := n&1 == 0
 		var bS [4]uint8
