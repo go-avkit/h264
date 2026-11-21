@@ -3,6 +3,8 @@ package cabac
 import (
 	"errors"
 
+	kcabac "github.com/go-videodsp/kernels/cabac"
+
 	"github.com/go-avkit/h264/internal/bits"
 )
 
@@ -30,15 +32,14 @@ type context struct {
 // recoverable (consumed), and the reader is put back there when a terminate
 // bin of 1 ends the arithmetic code, which is the only time anything else reads
 // the stream (I_PCM samples, the end of the slice).
+//
+// The engine state lives in a kernels cabac.State so that a whole residual
+// block is decoded by one call of the kernel (ResidualBlock), which shares the
+// state and the context array with the single-bin methods below.
 type Decoder struct {
-	r          *bits.Reader
-	data       []byte
-	ptr        int    // the next byte to fetch, counting those past the end
-	value      uint32 // codIOffset<<7 | lookahead
-	rng        uint32 // codIRange
-	bitsNeeded int    // -8..-1: shifts left before the next byte is due, minus eight
-	overflow   bool
-	ctx        [NumContexts]uint8 // pStateIdx<<1 | valMPS: one byte per context, see merged.go
+	r   *bits.Reader
+	st  kcabac.State       // Data, Ptr, Value (codIOffset<<7 | lookahead), Rng, BitsNeeded (-8..-1), Overflow
+	ctx [NumContexts]uint8 // pStateIdx<<1 | valMPS: one byte per context, see merged.go
 }
 
 // lpsShift is the renormalisation shift after a least probable symbol, by
@@ -77,29 +78,29 @@ func (d *Decoder) initContexts(table *[1024][2]int8, sliceQPY int) {
 // consumed is the position, in bits from the start of the data, that the
 // specification's bit-by-bit reader would be at: everything fetched, less the
 // lookahead that was not yet shifted into codIOffset.
-func (d *Decoder) consumed() int { return d.ptr*8 + d.bitsNeeded + 1 }
+func (d *Decoder) consumed() int { return d.st.Ptr*8 + d.st.BitsNeeded + 1 }
 
 // Overrun is how many bits the specification's reader would have had to read
 // past the end of the data (each read past the end yields a zero bit).
-func (d *Decoder) Overrun() int { return max(0, d.consumed()-len(d.data)*8) }
+func (d *Decoder) Overrun() int { return max(0, d.consumed()-len(d.st.Data)*8) }
 
 // fetch ORs the next byte (zero past the end) into the low byte of the value.
 func (d *Decoder) fetch(shift int) {
-	if d.ptr < len(d.data) {
-		d.value |= uint32(d.data[d.ptr]) << uint(shift)
+	if d.st.Ptr < len(d.st.Data) {
+		d.st.Value |= uint32(d.st.Data[d.st.Ptr]) << uint(shift)
 	}
-	d.ptr++
+	d.st.Ptr++
 }
 
 // sync puts the reader where the specification's would be.
 func (d *Decoder) sync() {
-	_ = d.r.Seek(min(d.consumed(), len(d.data)*8))
+	_ = d.r.Seek(min(d.consumed(), len(d.st.Data)*8))
 }
 
-func (d *Decoder) LevelOverflow() bool { return d.overflow }
+func (d *Decoder) LevelOverflow() bool { return d.st.Overflow != 0 }
 
 func (d *Decoder) Init(r *bits.Reader, sliceQPY int, intra bool, initIDC uint32) error {
-	d.overflow = false
+	d.st.Overflow = 0
 	if !r.ByteAligned() {
 		if err := d.consumeAlignmentBits(r); err != nil {
 			return err
@@ -144,61 +145,63 @@ func (d *Decoder) Restart(r *bits.Reader) error {
 		return bits.ErrOverrun
 	}
 	d.r = r
-	d.data = r.Data()
-	d.ptr = r.BitPos() / 8
-	d.rng = 510
+	d.st.Data = r.Data()
+	d.st.Ptr = r.BitPos() / 8
+	d.st.Rng = 510
 	// codIOffset is the first nine bits; the seven below them are the lookahead.
-	d.value = uint32(d.data[d.ptr])<<8 | uint32(d.data[d.ptr+1])
-	d.ptr += 2
-	d.bitsNeeded = -8
+	d.st.Value = uint32(d.st.Data[d.st.Ptr])<<8 | uint32(d.st.Data[d.st.Ptr+1])
+	d.st.Ptr += 2
+	d.st.BitsNeeded = -8
 	return nil
 }
 
 // DecodeDecision is DecodeDecision of 9.3.3.2.1 and its RenormD.
 func (d *Decoder) DecodeDecision(ctxIdx int) uint32 {
+	st := &d.st
 	s := d.ctx[ctxIdx]
-	lps := uint32(mergedLPS[s][d.rng>>6&3])
-	d.rng -= lps
-	scaled := d.rng << 7
-	if d.value < scaled {
+	lps := uint32(mergedLPS[s][st.Rng>>6&3])
+	st.Rng -= lps
+	scaled := st.Rng << 7
+	if st.Value < scaled {
 		d.ctx[ctxIdx] = mergedNextMPS[s]
 		// codIRange is below 512: the range fell below 256 exactly when bit 8 is
 		// clear, and then one doubling restores it. Written without a branch
 		// (the unpredictable one of the engine); the refill below fires once
 		// per eight shifts and is predictable.
-		sh := uint(^d.rng>>8) & 1
-		d.rng <<= sh
-		d.value <<= sh
-		d.bitsNeeded += int(sh)
-		if d.bitsNeeded >= 0 {
+		sh := uint(^st.Rng>>8) & 1
+		st.Rng <<= sh
+		st.Value <<= sh
+		st.BitsNeeded += int(sh)
+		if st.BitsNeeded >= 0 {
 			d.fetch(0)
-			d.bitsNeeded = -8
+			st.BitsNeeded = -8
 		}
 		return uint32(s & 1)
 	}
 	n := uint(lpsShift[lps>>3])
-	d.value = (d.value - scaled) << n
-	d.rng = lps << n
+	st.Value = (st.Value - scaled) << n
+	st.Rng = lps << n
 	d.ctx[ctxIdx] = mergedNextLPS[s]
-	d.bitsNeeded += int(n)
-	if d.bitsNeeded >= 0 {
-		d.fetch(d.bitsNeeded)
-		d.bitsNeeded -= 8
+	st.BitsNeeded += int(n)
+	if st.BitsNeeded >= 0 {
+		d.fetch(st.BitsNeeded)
+		st.BitsNeeded -= 8
 	}
 	return uint32(s&1) ^ 1
 }
 
 // DecodeBypass is DecodeBypass of 9.3.3.2.3.
 func (d *Decoder) DecodeBypass() uint32 {
-	d.value <<= 1
-	d.bitsNeeded++
-	if d.bitsNeeded >= 0 {
+	st := &d.st
+	st.Value <<= 1
+	st.BitsNeeded++
+	if st.BitsNeeded >= 0 {
 		d.fetch(0)
-		d.bitsNeeded = -8
+		st.BitsNeeded = -8
 	}
-	scaled := d.rng << 7
-	if d.value >= scaled {
-		d.value -= scaled
+	scaled := st.Rng << 7
+	if st.Value >= scaled {
+		st.Value -= scaled
 		return 1
 	}
 	return 0
@@ -208,19 +211,20 @@ func (d *Decoder) DecodeBypass() uint32 {
 // no renormalisation, and the reader is left at the bit the specification's would
 // be at, where the I_PCM samples or the end of the slice follow.
 func (d *Decoder) DecodeTerminate() uint32 {
-	d.rng -= 2
-	scaled := d.rng << 7
-	if d.value >= scaled {
+	st := &d.st
+	st.Rng -= 2
+	scaled := st.Rng << 7
+	if st.Value >= scaled {
 		d.sync()
 		return 1
 	}
 	if scaled < 256<<7 {
-		d.rng = scaled >> 6
-		d.value <<= 1
-		d.bitsNeeded++
-		if d.bitsNeeded >= 0 {
+		st.Rng = scaled >> 6
+		st.Value <<= 1
+		st.BitsNeeded++
+		if st.BitsNeeded >= 0 {
 			d.fetch(0)
-			d.bitsNeeded = -8
+			st.BitsNeeded = -8
 		}
 	}
 	return 0

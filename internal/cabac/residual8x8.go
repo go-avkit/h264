@@ -1,5 +1,7 @@
 package cabac
 
+import kcabac "github.com/go-videodsp/kernels/cabac"
+
 const CatLuma8x8 = 5
 
 const (
@@ -40,45 +42,25 @@ func (d *Decoder) ResidualBlock8x8(coeffs *[64]int32) int {
 	for i := range coeffs {
 		coeffs[i] = 0
 	}
-	// The significant positions are collected in order as the map is decoded, so
-	// the levels are read from the list (last to first) instead of scanning a flag
-	// array of 64 entries for the few that are set.
-	var pos [64]uint8
-	n := 0
-	last := false
-	for i := 0; i < 63; i++ {
-		if d.DecodeDecision(offSignificant8x8+int(significantCoeffFlagOffset8x8[i])) == 1 {
-			pos[n] = uint8(i)
-			n++
-			if d.DecodeDecision(offLastSignificant8x8+int(lastCoeffFlagOffset8x8[i])) == 1 {
-				last = true
-				break
-			}
-		}
-	}
-	if !last { // the last coefficient is significant without being coded (7.3.5.3.3)
-		pos[n] = 63
-		n++
-	}
+	return kcabac.Decode(&d.st, (*kcabac.Contexts)(&d.ctx), scan8x8, coeffs[:])
+}
 
-	numGt1, numEq1 := 0, 0
-	total := 0
-	for k := n - 1; k >= 0; k-- {
-		i := pos[k]
-		level := d.boundedLevel(d.absLevelMinus1At(offAbsLevel8x8, 4, numGt1, numEq1) + 1)
-		if level > 1 {
-			numGt1++
-		} else {
-			numEq1++
-		}
-		if d.DecodeBypass() == 1 {
-			coeffs[i] = int32(-level)
-		} else {
-			coeffs[i] = int32(level)
-		}
-		total++
+// scan8x8 is the kernel's description of an 8x8 block: the contexts of Table
+// 9-43 for the 63 coded positions and the level contexts at offAbsLevel8x8.
+var scan8x8 = buildScan8x8()
+
+func buildScan8x8() *kcabac.Scan {
+	sig := make([]uint16, 63)
+	last := make([]uint16, 63)
+	for i := range sig {
+		sig[i] = uint16(offSignificant8x8 + int(significantCoeffFlagOffset8x8[i]))
+		last[i] = uint16(offLastSignificant8x8 + int(lastCoeffFlagOffset8x8[i]))
 	}
-	return total
+	s, err := kcabac.NewScan(sig, last, offAbsLevel8x8, 4)
+	if err != nil {
+		panic(err)
+	}
+	return s
 }
 
 func (e *Encoder) absLevelMinus1At(base, limit, v, numGt1, numEq1 int) {
