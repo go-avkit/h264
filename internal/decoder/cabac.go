@@ -558,6 +558,9 @@ func (d *sliceDecoder) decodeInterMBBCABAC(info bMBTypeInfo, res *mbResidual) er
 }
 
 func (d *sliceDecoder) decodeMacroblockCABAC(res *mbResidual) error {
+	// Cleared here, not per macroblock in runCABAC: a skipped macroblock has no
+	// residual (decodeSkip does not take res), so it must not pay the 2656-byte clear.
+	res.reset()
 	if d.hdr.SliceType.IsI() {
 		v := d.cb.IntraMBType(d.intraMBTypeInc())
 		info, ok := intraMBType(uint32(v))
@@ -619,7 +622,6 @@ func (d *sliceDecoder) runCABAC() error {
 	}
 	for {
 		d.startMB(mbAddr)
-		res.reset()
 		if inter && d.cabacSkipFlag(isB) {
 			if err := d.decodeSkip(); err != nil {
 				return err
