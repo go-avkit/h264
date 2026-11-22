@@ -120,6 +120,16 @@ filter), the plain averages of two predictions outside the fused luma path, and
 the sizes outside the seven the standard uses for luma. Raw timings, with the
 load of each round: `docs/bench/amd64-kernels-zen4.txt`.
 
+**v0.16.0** stops clearing the whole macroblock grid (5 MB at 1080p) for every
+picture, and resets the residual buffer only for macroblocks that carry one; the API
+is unchanged. Whole decode, one core, Ryzen 9 7950X (core 9), 1080p, 9 rounds
+interleaved ABBA against v0.15.0 with an A/A control, framemd5 identical to ffmpeg
+on every frame of both clips: alien 2.02 s to 1.96 s (3.1 % less, A/A spread 0.2 %),
+fade 0.79 s to 0.76 s (4.4 % less, A/A spread 0.8 %). Instructions are unchanged;
+the gain is cache traffic (cycles 3 % less). The cycle profile of v0.15.0 is led by
+the CABAC decision decoder (7.8 %) and the motion-vector neighbour lookups (about 7 %,
+already resolved once per macroblock); no allocation or GC row is above 0.35 %.
+
 ## What the root package is not
 
 **It does not decode pictures.** There is no entropy decoding, no residual, no
