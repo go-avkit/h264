@@ -2,10 +2,6 @@
 
 package simd
 
-func sadDispatch(src []byte, srcStride int, ref []byte, refStride, w, h int) int {
-	return sadGeneric(src, srcStride, ref, refStride, w, h)
-}
-
 func Accelerated() bool { return false }
 
 func Forward4x4(b *[16]int32) {
@@ -26,14 +22,6 @@ func Dequant4x4(b *[16]int32, scale *[16]int32, shift uint32) {
 
 func AddResidual4x4(plane []byte, stride, offset int, b *[16]int32) {
 	addResidual4x4Generic(plane, stride, offset, b)
-}
-
-func satd4x4Dispatch(src []byte, srcStride int, ref []byte, refStride int) int {
-	return satd4x4Generic(src, srcStride, ref, refStride)
-}
-
-func satd8x8Dispatch(src []byte, srcStride int, ref []byte, refStride int) int {
-	return satd8x8Generic(src, srcStride, ref, refStride)
 }
 
 func sixTapHorizDispatch(dst []byte, dstStride, dstOff int, src []byte, srcStride, srcOff, w, h int) {

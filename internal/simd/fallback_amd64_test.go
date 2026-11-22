@@ -44,7 +44,6 @@ func TestEveryPathAgreesWhateverTheProcessorOffers(t *testing.T) {
 	const stride = 64
 	const rows = 64
 	src := fallbackPlane(rng, stride*rows)
-	ref := fallbackPlane(rng, stride*rows)
 
 	sizes := [][2]int{{16, 16}, {16, 8}, {8, 16}, {8, 8}, {8, 4}, {4, 8}, {4, 4}}
 	chromaSizes := [][2]int{{8, 8}, {8, 4}, {4, 8}, {4, 4}, {2, 4}, {2, 2}}
@@ -56,26 +55,6 @@ func TestEveryPathAgreesWhateverTheProcessorOffers(t *testing.T) {
 		}
 		t.Run(state.name, func(t *testing.T) {
 			withFeatures(t, state, func() {
-				for _, s := range sizes {
-					w, h := s[0], s[1]
-					off := 3*stride + 5
-					got := SAD(src, stride, off, ref, stride, off, w, h)
-					want := sadGeneric(src[off:], stride, ref[off:], stride, w, h)
-					if got != want {
-						t.Fatalf("SAD %dx%d gave %d, want %d", w, h, got, want)
-					}
-				}
-
-				off := 4*stride + 4
-				if got, want := SATD4x4(src, stride, off, ref, stride, off),
-					satd4x4Generic(src[off:], stride, ref[off:], stride); got != want {
-					t.Fatalf("SATD4x4 gave %d, want %d", got, want)
-				}
-				if got, want := SATD8x8(src, stride, off, ref, stride, off),
-					satd8x8Generic(src[off:], stride, ref[off:], stride); got != want {
-					t.Fatalf("SATD8x8 gave %d, want %d", got, want)
-				}
-
 				for _, s := range sizes {
 					w, h := s[0], s[1]
 					dstA := make([]byte, stride*rows)

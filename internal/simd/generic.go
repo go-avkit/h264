@@ -2,33 +2,6 @@ package simd
 
 import "encoding/binary"
 
-func absInt(v int) int {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
-
-func sadGeneric(src []byte, srcStride int, ref []byte, refStride, w, h int) int {
-	total := 0
-	for y := 0; y < h; y++ {
-		a := src[y*srcStride:]
-		b := ref[y*refStride:]
-		for x := 0; x < w; x++ {
-			total += absInt(int(a[x]) - int(b[x]))
-		}
-	}
-	return total
-}
-
-func SAD(src []byte, srcStride, srcOff int, ref []byte, refStride, refOff, w, h int) int {
-	return sadDispatch(src[srcOff:], srcStride, ref[refOff:], refStride, w, h)
-}
-
-func SADGeneric(src []byte, srcStride, srcOff int, ref []byte, refStride, refOff, w, h int) int {
-	return sadGeneric(src[srcOff:], srcStride, ref[refOff:], refStride, w, h)
-}
-
 func spanFits(b []byte, stride, w, h int) bool {
 	if h == 0 {
 		return true
@@ -144,56 +117,6 @@ func spanFitsMargin(b []byte, stride, off, w, h, left, right, top, bottom int) b
 	minOff := off - left - top*stride
 	maxOff := off + w - 1 + right + (h-1+bottom)*stride
 	return minOff >= 0 && maxOff < len(b)
-}
-
-func satd4x4Generic(src []byte, srcStride int, ref []byte, refStride int) int {
-	var d [16]int
-	for y := 0; y < 4; y++ {
-		a := src[y*srcStride:]
-		b := ref[y*refStride:]
-		for x := 0; x < 4; x++ {
-			d[y*4+x] = int(a[x]) - int(b[x])
-		}
-	}
-	for i := 0; i < 16; i += 4 {
-		s0, s1, s2, s3 := d[i], d[i+1], d[i+2], d[i+3]
-		t0 := s0 + s1
-		t1 := s0 - s1
-		t2 := s2 + s3
-		t3 := s2 - s3
-		d[i] = t0 + t2
-		d[i+1] = t1 + t3
-		d[i+2] = t0 - t2
-		d[i+3] = t1 - t3
-	}
-	total := 0
-	for i := 0; i < 4; i++ {
-		s0, s1, s2, s3 := d[i], d[i+4], d[i+8], d[i+12]
-		t0 := s0 + s1
-		t1 := s0 - s1
-		t2 := s2 + s3
-		t3 := s2 - s3
-		total += absInt(t0+t2) + absInt(t1+t3) + absInt(t0-t2) + absInt(t1-t3)
-	}
-	return (total + 1) >> 1
-}
-
-func SATD4x4(src []byte, srcStride, srcOff int, ref []byte, refStride, refOff int) int {
-	return satd4x4Dispatch(src[srcOff:], srcStride, ref[refOff:], refStride)
-}
-
-var satd8x8Offsets = [4][2]int{{0, 0}, {4, 0}, {0, 4}, {4, 4}}
-
-func satd8x8Generic(src []byte, srcStride int, ref []byte, refStride int) int {
-	total := 0
-	for _, o := range satd8x8Offsets {
-		total += satd4x4Generic(src[o[1]*srcStride+o[0]:], srcStride, ref[o[1]*refStride+o[0]:], refStride)
-	}
-	return total
-}
-
-func SATD8x8(src []byte, srcStride, srcOff int, ref []byte, refStride, refOff int) int {
-	return satd8x8Dispatch(src[srcOff:], srcStride, ref[refOff:], refStride)
 }
 
 func hFilter1(src []byte, off int) int {

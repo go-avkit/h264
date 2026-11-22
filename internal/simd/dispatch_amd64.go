@@ -2,29 +2,6 @@
 
 package simd
 
-func sadDispatch(src []byte, srcStride int, ref []byte, refStride, w, h int) int {
-	if !spanFits(src, srcStride, w, h) || !spanFits(ref, refStride, w, h) {
-		return sadGeneric(src, srcStride, ref, refStride, w, h)
-	}
-	switch {
-	case w == 16 && h == 16:
-		return sad16x16(src, srcStride, ref, refStride)
-	case w == 16 && h == 8:
-		return sad16x8(src, srcStride, ref, refStride)
-	case w == 8 && h == 16:
-		return sad8x16(src, srcStride, ref, refStride)
-	case w == 8 && h == 8:
-		return sad8x8(src, srcStride, ref, refStride)
-	case w == 8 && h == 4:
-		return sad8x4(src, srcStride, ref, refStride)
-	case w == 4 && h == 8:
-		return sad4x8(src, srcStride, ref, refStride)
-	case w == 4 && h == 4:
-		return sad4x4(src, srcStride, ref, refStride)
-	}
-	return sadGeneric(src, srcStride, ref, refStride, w, h)
-}
-
 func Accelerated() bool { return hasSSE41 }
 
 func Forward4x4(b *[16]int32) {
@@ -63,23 +40,6 @@ func AddResidual4x4(plane []byte, stride, offset int, b *[16]int32) {
 		return
 	}
 	addResidual4x4(plane[offset:], stride, b)
-}
-
-func satd4x4Dispatch(src []byte, srcStride int, ref []byte, refStride int) int {
-	if !hasSSE41 || !spanFits(src, srcStride, 4, 4) || !spanFits(ref, refStride, 4, 4) {
-		return satd4x4Generic(src, srcStride, ref, refStride)
-	}
-	return satd4x4(src, srcStride, ref, refStride)
-}
-
-func satd8x8Dispatch(src []byte, srcStride int, ref []byte, refStride int) int {
-	if !hasSSE41 || !spanFits(src, srcStride, 8, 8) || !spanFits(ref, refStride, 8, 8) {
-		return satd8x8Generic(src, srcStride, ref, refStride)
-	}
-	if hasAVX2 {
-		return satd8x8AVX2(src, srcStride, ref, refStride)
-	}
-	return satd8x8(src, srcStride, ref, refStride)
 }
 
 type sixTapFn func(dst []byte, dstStride int, src []byte, srcStride int)
