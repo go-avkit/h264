@@ -91,6 +91,18 @@ func newMBGrid(widthMBs, heightMBs int) *mbGrid {
 	}
 }
 
+// reset makes every slot read as not decoded for a new picture. Only Decoded
+// is written: a slot is cleared whole by startMB when a macroblock is decoded
+// into it, and nothing reads another field of a slot that is not Decoded
+// except motion, which treats such a slot as the zeroed one it used to be. The
+// whole-grid clear it replaces wrote 648 bytes per macroblock (5 MB at 1080p)
+// and cost 3 to 4 % of the decode time in cache traffic.
+func (g *mbGrid) reset() {
+	for i := range g.mbs {
+		g.mbs[i].Decoded = false
+	}
+}
+
 func (g *mbGrid) at(mbx, mby int) *mbState {
 	if mbx < 0 || mby < 0 || mbx >= g.widthMBs || mby >= g.heightMBs {
 		return nil
@@ -128,10 +140,21 @@ func (g *mbGrid) motion(mo *frame.Motion) *frame.Motion {
 	for mby := 0; mby < g.heightMBs; mby++ {
 		for mbx := 0; mbx < g.widthMBs; mbx++ {
 			m := g.at(mbx, mby)
-			if m == nil || m.Intra {
+			if m == nil || m.Intra && m.Decoded {
 				continue
 			}
 			base := mo.Index(mbx*4, mby*4)
+			if !m.Decoded {
+				// Never decoded (a damaged stream): reads as the zeroed slot
+				// it was when the grid was cleared whole, reference index 0
+				// with a zero vector in both lists.
+				for blk := 0; blk < 16; blk++ {
+					i := base + blockRowOff[blk]*mo.BlocksWide + blockColOff[blk]
+					mo.Mv[0][i], mo.RefIdx[0][i] = [2]int16{}, 0
+					mo.Mv[1][i], mo.RefIdx[1][i] = [2]int16{}, 0
+				}
+				continue
+			}
 			for blk := 0; blk < 16; blk++ {
 				if m.refIdxL0[blk] < 0 && m.refIdxL1[blk] < 0 {
 					continue
@@ -297,7 +320,7 @@ func (d *sliceDecoder) chromaNC(plane, blk int) int {
 
 func (d *Decoder) freshGrid(widthMBs, heightMBs int) *mbGrid {
 	if g := d.grid; g != nil && g.widthMBs == widthMBs && g.heightMBs == heightMBs {
-		clear(g.mbs)
+		g.reset()
 		return g
 	}
 	return newMBGrid(widthMBs, heightMBs)
