@@ -44,7 +44,6 @@ func TestEveryPathAgreesWhateverTheProcessorOffers(t *testing.T) {
 	const stride = 64
 	const rows = 64
 	src := fallbackPlane(rng, stride*rows)
-	ref := fallbackPlane(rng, stride*rows)
 
 	sizes := [][2]int{{16, 16}, {16, 8}, {8, 16}, {8, 8}, {8, 4}, {4, 8}, {4, 4}}
 	chromaSizes := [][2]int{{8, 8}, {8, 4}, {4, 8}, {4, 4}, {2, 4}, {2, 2}}
