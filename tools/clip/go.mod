@@ -3,7 +3,7 @@ module github.com/go-avkit/h264/tools/clip
 go 1.27.4
 
 require (
-	github.com/go-avkit/h264 v0.0.0
+	github.com/go-avkit/h264 v0.16.0
 	github.com/spf13/cobra v1.10.2
 )
 
